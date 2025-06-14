@@ -197,12 +197,14 @@ function GetLogName {
         $logname = Get-Variable -Name logname -Scope 2 -ValueOnly -ErrorAction Ignore
     }
 
-    if(!$logname){
         $cs = @(Get-PSCallStack)
+    Set-Variable -Name logcallstack -Value $cs -Scope 1
 
+    if(!$logname){
         for($i = 1; $i -lt $cs.Length; $i++){
             if(!$logname -and $cs[$i].InvocationInfo.BoundParameters.ContainsKey('logname')){
                 $logname = $cs[$i].InvocationInfo.BoundParameters.logname            
+                break       
             }
         }
     }
@@ -577,40 +579,23 @@ param(
     [switch] $ignorelog
 )
 begin{
-    if($PSBoundParameters.ContainsKey('logname') -and !$logname){
-        return
-    }
-    if(!$logname){
-        $logname = Get-Variable -Name logname -Scope 1 -ValueOnly -ErrorAction Ignore
-    }
-    if(!$logname -and $global:logging.Keys.Count -eq 1){
-        $logname = $global:logging.Keys | Select-Object -First 1 
-    }
+    $logname = GetLogName
 
     $relativelevel = 0
 
     $localverbose = $null
-    $cs = @(Get-PSCallStack)
 
-    for($i = 1; $i -lt $cs.Length; $i++){
-        if(!$logname -and $cs[$i].InvocationInfo.BoundParameters.ContainsKey('logname')){
-            $logname = $cs[$i].InvocationInfo.BoundParameters.logname            
-        }
-
-        if(!$relativelevel -and $cs[$i].ScriptName -ne $cs[0].ScriptName -and (!$logname -or $cs[$i].Command -notin $global:logging.$logname._IgnoreCommand)){
+    for($i = 2; $i -lt $logcallstack.Length; $i++){
+        if(!$relativelevel -and $logcallstack[$i].ScriptName -ne $logcallstack[0].ScriptName -and (!$logname -or $logcallstack[$i].Command -notin $global:logging.$logname._IgnoreCommand)){
             $relativelevel = $i
         }
 
-        if($null -eq $localverbose -and ($VerbosePreference -notin 'SilentlyContinue', 'Ignore' -or $cs[$i].InvocationInfo.BoundParameters.ContainsKey('Verbose'))){
+        if($null -eq $localverbose -and ($VerbosePreference -notin 'SilentlyContinue', 'Ignore' -or $logcallstack[$i].InvocationInfo.BoundParameters.ContainsKey('Verbose'))){
             $localverbose = $cs[$i].InvocationInfo.BoundParameters.Verbose
         }
     }
 
-    if(!$logname -and $global:logname){
-        $logname = $global:logname
-    }
-
-    if(!$logname -or !$global:logging.ContainsKey($logname)){
+    if(!$logname){
         $logname = $null
         if($env:AZUREPS_HOST_ENVIRONMENT -eq 'AzureAutomation' -or $host.name -eq 'Default Host'){
             Write-Error "Logname '$logname' is not valid"
@@ -625,11 +610,11 @@ begin{
         $localverbose = $global:logging.$logname._VerboseMode
     }
 
-    $environmentInvocation = $cs | Where-Object {$_.Location -notmatch ($global:logging.$logname._IgnoreLocation -join "|") -and $_.command -notmatch ($global:logging.$logname._IgnoreCommand -join "|")} | Select-Object -First 1 -ExpandProperty InvocationInfo
+    $environmentInvocation = $logcallstack | Where-Object {$_.Location -notmatch ($global:logging.$logname._IgnoreLocation -join "|") -and $_.command -notmatch ($global:logging.$logname._IgnoreCommand -join "|")} | Select-Object -First 1 -ExpandProperty InvocationInfo
 
-    $baseindent = [math]::max($cs.count - $relativelevel - 2, 0)
+    $baseindent = [math]::max($logcallstack.count - $relativelevel - 2, 0)
 
-    if($cs.Count -gt 2){
+    if($logcallstack.Count -gt 3){
         $baseindent += $global:logging.$logname._BaseIndent
     }
     elseif($indentlevel){
@@ -643,7 +628,7 @@ begin{
         $indentlevel = $indentlevel + $baseindent
     }
 
-    $linenumber = $cs[$relativelevel].ScriptLineNumber
+    $linenumber = $logcallstack[$relativelevel].ScriptLineNumber
     
     switch($type){
         'Info'           {$param = @{ForegroundColor = "Gray"}}
@@ -704,6 +689,9 @@ process{
             elseif($type -eq 'Warning'){
                 Write-Warning $line
             }
+            elseif($type -match '^(Progress|Highlight)$' -and @($logcallstack | Where-Object {$_.Location -notmatch "^ScriptTools\.psm1:" -and $_.command -ne $global:logging.$logname.ScriptName}).Count -le 1){
+                Write-Output $line
+            }
         }
         else{
             Write-Host -Object $line @param -NoNewline:$nonewline
@@ -749,7 +737,7 @@ end{
             if($global:logging.$logname._UseOutput){
                 get-content -Path $global:logging.$logname.LogPath -encoding utf8
 
-                if($cs.count -le 2){
+                if($logcallstack.count -le 3){
                     return
                 }
                 else{
@@ -766,7 +754,7 @@ end{
             }
         }
 
-        if($cs.count -le 2){
+        if($logcallstack.count -le 3){
             return
         }
         else{
@@ -1128,6 +1116,7 @@ param(
 
 #region Property management
 function Update-Property {
+[cmdletbinding()]
 param(
     [psobject] $object,
     [string]   $propname,
@@ -1219,7 +1208,8 @@ function Search-Property {
         [string[]] $Property = "*",
         [string[]] $ExcludeProperty,
         [string] $ObjectNameProp,
-        [switch] $CaseSensitive
+        [switch] $CaseSensitive,
+        [switch] $IgnoreCollections
     )
     begin{
         if($LiteralSearch -and $Pattern -ne "."){
@@ -1246,7 +1236,8 @@ function Search-Property {
                         $(if($SearchInPropertyNames){$_.value -as [string] -and $_.name -match $Pattern})
                     ) -and
                     !($ExcludeProperty | Where-Object {$propname -like $_}) -and
-                    ($Property | Where-Object {$propname -like $_})
+                    ($Property | Where-Object {$propname -like $_}) -and
+                    (!$IgnoreCollections -or $_.value -isnot [collections.ilist])
                 } | Sort-Object -Property Name | Select-Object -Property @{n = "Object"; e = {if($objectNameProp){$o.$objectNameProp}else{$o.tostring()}}}, Name, Value
         }
     }
@@ -1272,6 +1263,9 @@ param(
     $rs = 'r:'
     $ds = 'd:'
 
+    $rID = $null
+    $dID = $null
+
     if($null -ne $referenceobject){    
         $rp = $referenceobject.psobject.Properties |    
                 Where-Object {$_.membertype -ne 'AliasProperty'} |    
@@ -1286,6 +1280,8 @@ param(
             $objname = $referenceobject.tostring()
         }
         $rs = "r:" + $objname
+
+        $rID = $referenceobject.gettype().fullname + "-" + $(if($ReferenceObject.fullname){$ReferenceObject.fullname}else{$ReferenceObject.gethashcode()})
     }
 
     if($null -ne $differenceobject){    
@@ -1307,6 +1303,8 @@ param(
         }
 
         $ds = "d:" + $objname
+
+        $dID = $differenceobject.gettype().fullname + "-" + $(if($DifferenceObject.fullname){$DifferenceObject.fullname}else{$DifferenceObject.gethashcode()})
     }
 
     $allprops = $allprops | Where-Object {
@@ -1314,7 +1312,7 @@ param(
             ($property | Where-Object {$pp -like $_}) -and !($exclude | Where-Object {$pp -like $_})
         } | Sort-Object
     
-    if($_refs -eq $referenceobject -or $_diffs -eq $differenceobject){
+    if($_refs -eq $rID -or $_diffs -eq $dID){
         continue
     }
 
@@ -1322,8 +1320,12 @@ param(
         continue
     }
 
-    $_refs += $referenceobject
-    $_diffs += $differenceobject
+    $_refs += $rID
+    $_diffs += $dID
+
+    if((Get-PSCallStack).count -gt 20){
+        $dummy = 0
+    }
 
     foreach($p in $allprops){        
         $ra = $referenceobject.$p
@@ -1419,7 +1421,7 @@ param(
         if((!$excludedifferent -and $equal -ne '==') -or ($includeequal -and $equal -eq '==')){    
             [pscustomobject] @{    
                 Property = $p    
-                Equal = $equal    
+                Relation = $equal    
                 $rs = $ReferenceObject.$p
                 $ds = $DifferenceObject.$p
             }    
