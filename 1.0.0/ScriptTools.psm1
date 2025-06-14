@@ -114,6 +114,8 @@ param(
 
     $logFile = New-LogFile -name $logname -path $path -keepdays $keepdays -logname $logname -byseconds:$BySeconds -datepart $datePart
 
+    $cs[1].InvocationInfo.BoundParameters.logname = $logFile.name
+
     $parentprocess = $null
     $myprocess = Get-CimInstance -ClassName Win32_process -Filter "ProcessID = '$PID'" -Verbose:$false
     if($myprocess.ParentProcessId){
@@ -179,7 +181,7 @@ param(
                 New-LogEntry -indentlevel 1 -logname $logFile.key
     }
 
-    $cs[1].InvocationInfo.BoundParameters.logname = $logFile.key
+    $logFile.DelayedLogEntries | New-LogEntry -indentlevel 1
 
     return $logFile.key
 }
@@ -189,20 +191,16 @@ function GetLogName {
         $logname = $global:logging.Keys | Select-Object -First 1 
     }
 
-    if(!$logname){
-        $logname = Get-Variable -Name logname -Scope 1 -ValueOnly -ErrorAction Ignore
-    }
+    $cs = @(Get-PSCallStack | Where-Object {$_.Location -ne '<No file>'})
+    $realstack = @($cs | Where-Object {$_.ScriptName -ne $cs[0].ScriptName})
+    Set-Variable -Name logcallstack -Value $cs -Scope 1
+    Set-Variable -Name logrealdepth -Value $realstack.Count -Scope 1
 
     if(!$logname){
-        $logname = Get-Variable -Name logname -Scope 2 -ValueOnly -ErrorAction Ignore
-    }
-
-    if(!$logname){
-        $cs = @(Get-PSCallStack)
-
         for($i = 1; $i -lt $cs.Length; $i++){
             if(!$logname -and $cs[$i].InvocationInfo.BoundParameters.ContainsKey('logname')){
                 $logname = $cs[$i].InvocationInfo.BoundParameters.logname            
+                break       
             }
         }
     }
@@ -217,11 +215,11 @@ function GetLogName {
 function Write-LogProgress {
 [cmdletbinding()]
     param(
-        $inputarray,
-        [string] $action,
-        [int] $percent,
+        $InputArray,
+        [string][Alias('Action')] $Activity,
+        [int] $Percent,
         [string] $logname,
-        [int] $progresslogfirst
+        [int] $ProgressLogFirst
     )
 
     if(!$inputarray -or !$inputarray.count){
@@ -276,7 +274,7 @@ function Write-LogProgress {
 
         $done = "{0,$("$($inputarray.Count)".Length)}" -f $global:logging.$logname._Progress.Counter
         $left = "{0,$("$($inputarray.Count)".Length)}" -f ($inputarray.Count - $global:logging.$logname._Progress.Counter)
-        Write-Progress -Activity $action -Status "All: $($inputarray.Count) Done: $done Left: $left" -PercentComplete $percent -SecondsRemaining $timeleft
+        Write-Progress -Activity $Activity -Status "All: $($inputarray.Count) Done: $done Left: $left" -PercentComplete $percent -SecondsRemaining $timeleft
         $global:logging.$logname._Progress.BarNext = (get-date).AddSeconds($global:logging.$logname._Progress.BarSec)
     }
 
@@ -337,20 +335,28 @@ param(
         $key = $name
     }
 
+    $delayedLogEntries = @()
     if($keepdays){
-        Get-ChildItem -Path $path -Filter $searchname | Where-Object {((get-date) - $_.CreationTime).totaldays -gt $keepdays} |
+        Get-ChildItem -Path $path -Filter $searchname | Where-Object {((get-date) - $_.LastWriteTime).totaldays -gt $keepdays} |
             ForEach-Object {
-                New-LogEntry "Removing obsolete file: '$($_.FullName)'" -indent 1
+                if(!$logname -or !$global.logging.$logname){
+                    $delayedLogEntries += "Removing obsolete file: '$($_.FullName)'"
+                }
+                else{
+                    New-LogEntry -message "Removing obsolete file: '$($_.FullName)'" -indentlevel 1
+                }
                 Remove-Item -Path $_.FullName
             }
     }
 
     if($overwrite -or (!(Test-Path -Path (Join-Path -Path $path -ChildPath $filename)))){
-        New-Item -Path $path -Name $filename -ItemType file -Force:$overwrite | Add-Member -MemberType NoteProperty -Name New -Value $true -PassThru | Add-Member -MemberType NoteProperty -Name Key -Value $key -PassThru
+        $file = New-Item -Path $path -Name $filename -ItemType file -Force:$overwrite | Add-Member -MemberType NoteProperty -Name New -Value $true -PassThru 
     }
     else{
-        Get-Item -Path (Join-Path -Path $path -ChildPath $filename) | Add-Member -MemberType NoteProperty -Name New -Value $false -PassThru | Add-Member -MemberType NoteProperty -Name Key -Value $key -PassThru
+        $file = Get-Item -Path (Join-Path -Path $path -ChildPath $filename) | Add-Member -MemberType NoteProperty -Name New -Value $false -PassThru
     }
+
+    Add-Member -InputObject $file -MemberType NoteProperty -Name Key -Value $key -PassThru | Add-Member -MemberType NoteProperty -Name DelayedLogEntries -Value $delayedLogEntries -PassThru
 }
 
 function FormatBorder {
@@ -441,7 +447,7 @@ process{
         }
     }
     if($divide){
-        $lines += "-" * 100
+        $lines += "-" * 92
     }
 }
 end{
@@ -574,43 +580,27 @@ param(
     [switch] $nonewline,
     [switch] $displayonly,
     [string] $logname,
-    [switch] $ignorelog
+    [switch] $ignorelog,
+    $exitcode
 )
 begin{
-    if($PSBoundParameters.ContainsKey('logname') -and !$logname){
-        return
-    }
-    if(!$logname){
-        $logname = Get-Variable -Name logname -Scope 1 -ValueOnly -ErrorAction Ignore
-    }
-    if(!$logname -and $global:logging.Keys.Count -eq 1){
-        $logname = $global:logging.Keys | Select-Object -First 1 
-    }
+    $logname = GetLogName
 
     $relativelevel = 0
 
     $localverbose = $null
-    $cs = @(Get-PSCallStack)
 
-    for($i = 1; $i -lt $cs.Length; $i++){
-        if(!$logname -and $cs[$i].InvocationInfo.BoundParameters.ContainsKey('logname')){
-            $logname = $cs[$i].InvocationInfo.BoundParameters.logname            
-        }
-
-        if(!$relativelevel -and $cs[$i].ScriptName -ne $cs[0].ScriptName -and (!$logname -or $cs[$i].Command -notin $global:logging.$logname._IgnoreCommand)){
+    for($i = 1; $i -lt $logcallstack.Length; $i++){
+        if(!$relativelevel -and $logcallstack[$i].ScriptName -ne $logcallstack[0].ScriptName -and (!$logname -or $logcallstack[$i].Command -notin $global:logging.$logname._IgnoreCommand)){
             $relativelevel = $i
         }
 
-        if($null -eq $localverbose -and ($VerbosePreference -notin 'SilentlyContinue', 'Ignore' -or $cs[$i].InvocationInfo.BoundParameters.ContainsKey('Verbose'))){
-            $localverbose = $cs[$i].InvocationInfo.BoundParameters.Verbose
+        if($null -eq $localverbose -and ($VerbosePreference -notin 'SilentlyContinue', 'Ignore' -or $logcallstack[$i].InvocationInfo.BoundParameters.ContainsKey('Verbose'))){
+            $localverbose = $logcallstack[$i].InvocationInfo.BoundParameters.Verbose
         }
     }
 
-    if(!$logname -and $global:logname){
-        $logname = $global:logname
-    }
-
-    if(!$logname -or !$global:logging.ContainsKey($logname)){
+    if(!$logname){
         $logname = $null
         if($env:AZUREPS_HOST_ENVIRONMENT -eq 'AzureAutomation' -or $host.name -eq 'Default Host'){
             Write-Error "Logname '$logname' is not valid"
@@ -625,25 +615,22 @@ begin{
         $localverbose = $global:logging.$logname._VerboseMode
     }
 
-    $environmentInvocation = $cs | Where-Object {$_.Location -notmatch ($global:logging.$logname._IgnoreLocation -join "|") -and $_.command -notmatch ($global:logging.$logname._IgnoreCommand -join "|")} | Select-Object -First 1 -ExpandProperty InvocationInfo
+    $environmentInvocation = $logcallstack | Where-Object {$_.Location -notmatch ($global:logging.$logname._IgnoreLocation -join "|") -and $_.command -notmatch ($global:logging.$logname._IgnoreCommand -join "|")} | Select-Object -First 1 -ExpandProperty InvocationInfo
 
-    $baseindent = [math]::max($cs.count - $relativelevel - 2, 0)
+    $baseindent = [math]::Max($logrealdepth - 1, 0)
 
-    if($cs.Count -gt 2){
-        $baseindent += $global:logging.$logname._BaseIndent
-    }
-    elseif($indentlevel){
+    if($indentlevel){
         $global:logging.$logname._BaseIndent = $indentlevel
     }
     else{
-        $global:logging.$logname._BaseIndent = 0
+        $global:logging.$logname._BaseIndent = $baseindent
     }
 
     if(!$useabsoluteindent){
         $indentlevel = $indentlevel + $baseindent
     }
 
-    $linenumber = $cs[$relativelevel].ScriptLineNumber
+    $linenumber = $logcallstack[$relativelevel].ScriptLineNumber
     
     switch($type){
         'Info'           {$param = @{ForegroundColor = "Gray"}}
@@ -655,7 +642,7 @@ begin{
         'Negative'       {$param = @{ForegroundColor = "Red"}}
         'Exit'           {$param = @{ForegroundColor = "Green"}}
         'Terminate'      {$param = @{ForegroundColor = "Red"; BackgroundColor = 'Black'}; $global:logging.$logname._ErrorsLogged++}
-        'Unhandled'      {$param = @{ForegroundColor = "DarkRed"; BackgroundColor = 'DarkGray'}; $global:logging.$logname._ErrorsLogged++}
+        'Unhandled'      {$param = @{ForegroundColor = "Red"; BackgroundColor = 'DarkGray'}; $global:logging.$logname._ErrorsLogged++}
         'Progress'       {$param = @{ForegroundColor = "Magenta"}}
     }
 
@@ -704,6 +691,9 @@ process{
             elseif($type -eq 'Warning'){
                 Write-Warning $line
             }
+            elseif($type -match '^(Progress|Highlight)$' -and @($logcallstack | Where-Object {$_.ScriptName -ne $logcallstack[0].ScriptName}).Count -le 1){
+                Write-Output $line
+            }
         }
         else{
             Write-Host -Object $line @param -NoNewline:$nonewline
@@ -716,14 +706,16 @@ end{
             
             New-LogFooter -logname $logname
 
-            if($global:logging.$logname._ErrorsLogged){
-                $exitcode = 1
-            }
-            elseif($global:logging.$logname._WarningsLogged){
-                $exitcode = 2
-            }
-            else{
-                $exitcode = 0
+            if($null -eq $exitcode -or $exitcode -isnot [int]){
+                if($global:logging.$logname._ErrorsLogged){
+                    $exitcode = 1
+                }
+                elseif($global:logging.$logname._WarningsLogged){
+                    $exitcode = 2
+                }
+                else{
+                    $exitcode = 0
+                }
             }
 
             if(!$ignorelog){
@@ -749,7 +741,7 @@ end{
             if($global:logging.$logname._UseOutput){
                 get-content -Path $global:logging.$logname.LogPath -encoding utf8
 
-                if($cs.count -le 2){
+                if($logcallstack.count -le 3){
                     return
                 }
                 else{
@@ -758,7 +750,12 @@ end{
             }
             elseif($global:logging.$logname.ScriptName -ne 'Interactive'){
                 if($global:logging.$logname._parentprocess.Name -in 'exporer.exe', 'WindowsTerminal.exe' -or $Host.Name -match 'ISE|Visual Studio'){
-                    exit $exitcode
+                    if($logrealdepth -lt 1){
+                        throw "$($type)ing session with exit code $exitcode"
+                    }
+                    else{
+                        exit $exitcode
+                    }
                 }
                 else{
                     [environment]::Exit($exitcode)
@@ -766,7 +763,7 @@ end{
             }
         }
 
-        if($cs.count -le 2){
+        if($logcallstack.count -le 3){
             return
         }
         else{
@@ -1128,6 +1125,7 @@ param(
 
 #region Property management
 function Update-Property {
+[cmdletbinding()]
 param(
     [psobject] $object,
     [string]   $propname,
@@ -1139,6 +1137,7 @@ param(
         Write-Error "No object - update propery"        
         return
     }
+
     if($object -is [hashtable] -and !$object.containskey($propname)){
         $object.$propname = $value
     }
@@ -1197,7 +1196,19 @@ param(
     elseif($object.$propname -is [System.Collections.Hashtable] -and $value -is [System.Collections.Hashtable]){
         $keys = [object[]] $value.keys
         foreach($key in $keys){
-            $object.$propname.$key = $value.$key
+            if($object.$propname.containskey($key)){
+                if($object.$propname.$key -notin $value.$key){
+                    if($null -ne $object.$propname.$key){
+                        $object.$propname.$key = @($object.$propname.$key) + $value.$key
+                    }
+                    else{
+                        $object.$propname.$key = $value.$key
+                    }
+                }
+            }
+            else{
+                $object.$propname.$key = $value.$key
+            }
         }
     }
     else{
@@ -1219,7 +1230,8 @@ function Search-Property {
         [string[]] $Property = "*",
         [string[]] $ExcludeProperty,
         [string] $ObjectNameProp,
-        [switch] $CaseSensitive
+        [switch] $CaseSensitive,
+        [switch] $IgnoreCollections
     )
     begin{
         if($LiteralSearch -and $Pattern -ne "."){
@@ -1246,7 +1258,8 @@ function Search-Property {
                         $(if($SearchInPropertyNames){$_.value -as [string] -and $_.name -match $Pattern})
                     ) -and
                     !($ExcludeProperty | Where-Object {$propname -like $_}) -and
-                    ($Property | Where-Object {$propname -like $_})
+                    ($Property | Where-Object {$propname -like $_}) -and
+                    (!$IgnoreCollections -or $_.value -isnot [collections.ilist])
                 } | Sort-Object -Property Name | Select-Object -Property @{n = "Object"; e = {if($objectNameProp){$o.$objectNameProp}else{$o.tostring()}}}, Name, Value
         }
     }
@@ -1272,6 +1285,9 @@ param(
     $rs = 'r:'
     $ds = 'd:'
 
+    $rID = $null
+    $dID = $null
+
     if($null -ne $referenceobject){    
         $rp = $referenceobject.psobject.Properties |    
                 Where-Object {$_.membertype -ne 'AliasProperty'} |    
@@ -1286,6 +1302,9 @@ param(
             $objname = $referenceobject.tostring()
         }
         $rs = "r:" + $objname
+
+        $rID = $referenceobject.gettype().fullname + "-" + $(if($ReferenceObject.fullname){$ReferenceObject.fullname}else{$ReferenceObject.gethashcode()}) + 
+                $rp
     }
 
     if($null -ne $differenceobject){    
@@ -1307,6 +1326,9 @@ param(
         }
 
         $ds = "d:" + $objname
+
+        $dID = $differenceobject.gettype().fullname + "-" + $(if($DifferenceObject.fullname){$DifferenceObject.fullname}else{$DifferenceObject.gethashcode()}) + 
+                $dp
     }
 
     $allprops = $allprops | Where-Object {
@@ -1314,16 +1336,16 @@ param(
             ($property | Where-Object {$pp -like $_}) -and !($exclude | Where-Object {$pp -like $_})
         } | Sort-Object
     
-    if($_refs -eq $referenceobject -or $_diffs -eq $differenceobject){
-        continue
+    if($_refs -eq $rID -or $_diffs -eq $dID){
+        return
     }
 
     if($ra -and $ra.gettype().fullname -in 'System.RuntimeType', 'System.Reflection.RuntimeAssembly'){
-        continue
+        return
     }
 
-    $_refs += $referenceobject
-    $_diffs += $differenceobject
+    $_refs += $rID
+    $_diffs += $dID
 
     foreach($p in $allprops){        
         $ra = $referenceobject.$p
@@ -1419,7 +1441,7 @@ param(
         if((!$excludedifferent -and $equal -ne '==') -or ($includeequal -and $equal -eq '==')){    
             [pscustomobject] @{    
                 Property = $p    
-                Equal = $equal    
+                Relation = $equal    
                 $rs = $ReferenceObject.$p
                 $ds = $DifferenceObject.$p
             }    
