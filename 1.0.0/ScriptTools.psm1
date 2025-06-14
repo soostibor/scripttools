@@ -607,7 +607,7 @@ begin{
 
     $environmentInvocation = $logcallstack | Where-Object {$_.Location -notmatch ($global:logging.$logname._IgnoreLocation -join "|") -and $_.command -notmatch ($global:logging.$logname._IgnoreCommand -join "|")} | Select-Object -First 1 -ExpandProperty InvocationInfo
 
-    $baseindent = $logrealdepth - 1
+    $baseindent = [math]::Max($logrealdepth - 1, 0)
 
     if($indentlevel){
         $global:logging.$logname._BaseIndent = $indentlevel
@@ -681,7 +681,7 @@ process{
             elseif($type -eq 'Warning'){
                 Write-Warning $line
             }
-            elseif($type -match '^(Progress|Highlight)$' -and @($logcallstack | Where-Object {$_.ScriptName -ne $logcallstack[0].ScriptName -and $_.command -ne $global:logging.$logname.ScriptName}).Count -le 1){
+            elseif($type -match '^(Progress|Highlight)$' -and @($logcallstack | Where-Object {$_.ScriptName -ne $logcallstack[0].ScriptName}).Count -le 1){
                 Write-Output $line
             }
         }
@@ -740,8 +740,8 @@ end{
             }
             elseif($global:logging.$logname.ScriptName -ne 'Interactive'){
                 if($global:logging.$logname._parentprocess.Name -in 'exporer.exe', 'WindowsTerminal.exe' -or $Host.Name -match 'ISE|Visual Studio'){
-                    if($logcallstack[-2].scriptname -ne $logcallstack[0].ScriptName){
-                        throw "$($type)ing interactive session with exit code $exitcode"
+                    if($logrealdepth -lt 1){
+                        throw "$($type)ing session with exit code $exitcode"
                     }
                     else{
                         exit $exitcode
