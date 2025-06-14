@@ -189,16 +189,10 @@ function GetLogName {
         $logname = $global:logging.Keys | Select-Object -First 1 
     }
 
-    if(!$logname){
-        $logname = Get-Variable -Name logname -Scope 1 -ValueOnly -ErrorAction Ignore
-    }
-
-    if(!$logname){
-        $logname = Get-Variable -Name logname -Scope 2 -ValueOnly -ErrorAction Ignore
-    }
-
-        $cs = @(Get-PSCallStack)
+    $cs = @(Get-PSCallStack | Where-Object {$_.Location -ne '<No file>'})
+    $realstack = @($cs | Where-Object {$_.ScriptName -ne $cs[0].ScriptName})
     Set-Variable -Name logcallstack -Value $cs -Scope 1
+    Set-Variable -Name logrealdepth -Value $realstack.Count -Scope 1
 
     if(!$logname){
         for($i = 1; $i -lt $cs.Length; $i++){
@@ -443,7 +437,7 @@ process{
         }
     }
     if($divide){
-        $lines += "-" * 100
+        $lines += "-" * 92
     }
 }
 end{
@@ -576,7 +570,8 @@ param(
     [switch] $nonewline,
     [switch] $displayonly,
     [string] $logname,
-    [switch] $ignorelog
+    [switch] $ignorelog,
+    $exitcode
 )
 begin{
     $logname = GetLogName
@@ -612,16 +607,13 @@ begin{
 
     $environmentInvocation = $logcallstack | Where-Object {$_.Location -notmatch ($global:logging.$logname._IgnoreLocation -join "|") -and $_.command -notmatch ($global:logging.$logname._IgnoreCommand -join "|")} | Select-Object -First 1 -ExpandProperty InvocationInfo
 
-    $baseindent = [math]::max($logcallstack.count - $relativelevel - 2, 0)
+    $baseindent = $logrealdepth - 1
 
-    if($logcallstack.Count -gt 3){
-        $baseindent += $global:logging.$logname._BaseIndent
-    }
-    elseif($indentlevel){
+    if($indentlevel){
         $global:logging.$logname._BaseIndent = $indentlevel
     }
     else{
-        $global:logging.$logname._BaseIndent = 0
+        $global:logging.$logname._BaseIndent = $baseindent
     }
 
     if(!$useabsoluteindent){
@@ -640,7 +632,7 @@ begin{
         'Negative'       {$param = @{ForegroundColor = "Red"}}
         'Exit'           {$param = @{ForegroundColor = "Green"}}
         'Terminate'      {$param = @{ForegroundColor = "Red"; BackgroundColor = 'Black'}; $global:logging.$logname._ErrorsLogged++}
-        'Unhandled'      {$param = @{ForegroundColor = "DarkRed"; BackgroundColor = 'DarkGray'}; $global:logging.$logname._ErrorsLogged++}
+        'Unhandled'      {$param = @{ForegroundColor = "Red"; BackgroundColor = 'DarkGray'}; $global:logging.$logname._ErrorsLogged++}
         'Progress'       {$param = @{ForegroundColor = "Magenta"}}
     }
 
@@ -689,7 +681,7 @@ process{
             elseif($type -eq 'Warning'){
                 Write-Warning $line
             }
-            elseif($type -match '^(Progress|Highlight)$' -and @($logcallstack | Where-Object {$_.Location -notmatch "^ScriptTools\.psm1:" -and $_.command -ne $global:logging.$logname.ScriptName}).Count -le 1){
+            elseif($type -match '^(Progress|Highlight)$' -and @($logcallstack | Where-Object {$_.ScriptName -ne $logcallstack[0].ScriptName -and $_.command -ne $global:logging.$logname.ScriptName}).Count -le 1){
                 Write-Output $line
             }
         }
@@ -704,14 +696,16 @@ end{
             
             New-LogFooter -logname $logname
 
-            if($global:logging.$logname._ErrorsLogged){
-                $exitcode = 1
-            }
-            elseif($global:logging.$logname._WarningsLogged){
-                $exitcode = 2
-            }
-            else{
-                $exitcode = 0
+            if($null -eq $exitcode -or $exitcode -isnot [int]){
+                if($global:logging.$logname._ErrorsLogged){
+                    $exitcode = 1
+                }
+                elseif($global:logging.$logname._WarningsLogged){
+                    $exitcode = 2
+                }
+                else{
+                    $exitcode = 0
+                }
             }
 
             if(!$ignorelog){
@@ -746,7 +740,12 @@ end{
             }
             elseif($global:logging.$logname.ScriptName -ne 'Interactive'){
                 if($global:logging.$logname._parentprocess.Name -in 'exporer.exe', 'WindowsTerminal.exe' -or $Host.Name -match 'ISE|Visual Studio'){
-                    exit $exitcode
+                    if($logcallstack[-2].scriptname -ne $logcallstack[0].ScriptName){
+                        throw "$($type)ing interactive session with exit code $exitcode"
+                    }
+                    else{
+                        exit $exitcode
+                    }
                 }
                 else{
                     [environment]::Exit($exitcode)
@@ -1128,6 +1127,7 @@ param(
         Write-Error "No object - update propery"        
         return
     }
+
     if($object -is [hashtable] -and !$object.containskey($propname)){
         $object.$propname = $value
     }
@@ -1186,7 +1186,19 @@ param(
     elseif($object.$propname -is [System.Collections.Hashtable] -and $value -is [System.Collections.Hashtable]){
         $keys = [object[]] $value.keys
         foreach($key in $keys){
-            $object.$propname.$key = $value.$key
+            if($object.$propname.containskey($key)){
+                if($object.$propname.$key -ne $value.$key){
+                    if($null -ne $object.$propname.$key){
+                        $object.$propname.$key = @($object.$propname.$key) + $value.$key
+                    }
+                    else{
+                        $object.$propname.$key = $value.$key
+                    }
+                }
+            }
+            else{
+                $object.$propname.$key = $value.$key
+            }
         }
     }
     else{
