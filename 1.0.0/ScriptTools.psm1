@@ -112,6 +112,8 @@ param(
         $global:logging = @{}
     }
 
+    $cs[1].InvocationInfo.BoundParameters.logname = $logname
+
     $logFile = New-LogFile -name $logname -path $path -keepdays $keepdays -logname $logname -byseconds:$BySeconds -datepart $datePart
 
     $parentprocess = $null
@@ -179,7 +181,7 @@ param(
                 New-LogEntry -indentlevel 1 -logname $logFile.key
     }
 
-    $cs[1].InvocationInfo.BoundParameters.logname = $logFile.key
+    $logFile.DelayedLogEntries | New-LogEntry -indentlevel 1
 
     return $logFile.key
 }
@@ -333,20 +335,28 @@ param(
         $key = $name
     }
 
+    $delayedLogEntries = @()
     if($keepdays){
-        Get-ChildItem -Path $path -Filter $searchname | Where-Object {((get-date) - $_.CreationTime).totaldays -gt $keepdays} |
+        Get-ChildItem -Path $path -Filter $searchname | Where-Object {((get-date) - $_.LastWriteTime).totaldays -gt $keepdays} |
             ForEach-Object {
-                New-LogEntry "Removing obsolete file: '$($_.FullName)'" -indent 1
+                if(!$logname -or !$global.logging.$logname){
+                    $delayedLogEntries += "Removing obsolete file: '$($_.FullName)'"
+                }
+                else{
+                    New-LogEntry -message "Removing obsolete file: '$($_.FullName)'" -indentlevel 1
+                }
                 Remove-Item -Path $_.FullName
             }
     }
 
     if($overwrite -or (!(Test-Path -Path (Join-Path -Path $path -ChildPath $filename)))){
-        New-Item -Path $path -Name $filename -ItemType file -Force:$overwrite | Add-Member -MemberType NoteProperty -Name New -Value $true -PassThru | Add-Member -MemberType NoteProperty -Name Key -Value $key -PassThru
+        $file = New-Item -Path $path -Name $filename -ItemType file -Force:$overwrite | Add-Member -MemberType NoteProperty -Name New -Value $true -PassThru 
     }
     else{
-        Get-Item -Path (Join-Path -Path $path -ChildPath $filename) | Add-Member -MemberType NoteProperty -Name New -Value $false -PassThru | Add-Member -MemberType NoteProperty -Name Key -Value $key -PassThru
+        $file = Get-Item -Path (Join-Path -Path $path -ChildPath $filename) | Add-Member -MemberType NoteProperty -Name New -Value $false -PassThru
     }
+
+    Add-Member -InputObject $file -MemberType NoteProperty -Name Key -Value $key -PassThru | Add-Member -MemberType NoteProperty -Name DelayedLogEntries -Value $delayedLogEntries -PassThru
 }
 
 function FormatBorder {
