@@ -926,7 +926,6 @@ param(
                     MergeHives -hive $h.value -target $target.($h.key)
                 }
                 catch{
-                    $dummy = 0
                 }
             }
         }
@@ -1036,7 +1035,7 @@ begin{
     $position = $StartPosition
 }
 process{
-    if($Condition -eq $null -or (&$Condition)){
+    if($null -eq $Condition -or (&$Condition)){
         $attributeCollection = new-object -TypeName System.Collections.ObjectModel.Collection[Attribute]
 
         foreach($psn in $ParameterSetName){
@@ -1071,7 +1070,7 @@ process{
 
         $param = new-object -TypeName System.Management.Automation.RuntimeDefinedParameter -ArgumentList $Name, $Type, $attributeCollection
         
-        $global:psb = $PSBoundParameters
+        $global:psb = $PSBoundParameters # defined for troubleshooting
         if($PSBoundParameters.ContainsKey('defaultValue') -and $null -ne $DefaultValue){
             $si = Get-PSCallStack
             if($DefaultValue -is [scriptblock]){
