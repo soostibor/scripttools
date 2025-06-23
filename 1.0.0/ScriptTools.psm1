@@ -1274,8 +1274,8 @@ param(
     [string[]] $Exclude,
     [string] $NameProperty,
     [string] [ValidateSet('None','Empty','NonEmpty','BothEmpty')] $Hide = 'None',
-    [Parameter(Dontshow = $true)][object[]] $_refs,
-    [Parameter(Dontshow = $true)][object[]] $_diffs
+    [Parameter(Dontshow = $true)][string[]] $_refs,
+    [Parameter(Dontshow = $true)][string[]] $_diffs
 )
 
     $allprops = @()
