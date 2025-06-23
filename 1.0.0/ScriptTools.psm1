@@ -741,8 +741,8 @@ end{
             if($global:logging.$LogName._UseOutput){
                 get-content -Path $global:logging.$LogName.LogPath -encoding utf8
 
-                if($logcallstack.count -le 3){
-                    return
+                if($logrealdepth -lt 1 -and ($global:logging.$LogName._parentprocess.Name -in 'exporer.exe', 'WindowsTerminal.exe' -or $Host.Name -match 'ISE|Visual Studio')){
+                    throw "$($Type)ing session with exit code $ExitCode"
                 }
                 else{
                     exit $ExitCode
