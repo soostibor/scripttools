@@ -2152,4 +2152,6 @@ foreach($key in $keys){
 
 #endregion
 
-Export-ModuleMember -Variable scriptinvocation -Function '*' 
+New-Alias -Name Compare-ObjectProperty -Value Compare-Property
+
+Export-ModuleMember -Variable scriptinvocation -Function '*' -Alias Compare-ObjectProperty
