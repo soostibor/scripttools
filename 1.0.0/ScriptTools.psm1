@@ -1,4 +1,9 @@
-﻿#region Logging
+﻿<#
+    Author: Tibor Soós (soos.tibor@hotmail.com)
+    Version: 1.3.0 [2025.07.29]
+#>
+
+#region Logging
 function Initialize-Logging {
 [CmdletBinding()]
 param(
@@ -884,7 +889,14 @@ param(
             if($Confighive.$key -is [hashtable]){
                 ResolveDynamicData -confighive $Confighive.$key -parentkeys ($parentkeys + $key)
             }
-            elseif($Confighive.$key -is [scriptblock] -and (!$Confighive.ContainsKey('Condition') -or $Confighive.Condition)){
+            elseif($Confighive.$key -is [System.Object[]]){
+                for($i = 0; $i -lt $Confighive.$key.count; $i++){
+                    if($Confighive.$key[$i] -is [scriptblock] -and $key -notlike 'sb_*'){
+                        $Confighive.$key[$i] = &(& $elem)
+                    }
+                }
+            }
+            elseif($Confighive.$key -is [scriptblock] -and $key -notlike 'sb_*' -and (!$Confighive.ContainsKey('Condition') -or $Confighive.Condition)){
                 $errorhappened = $false
                 $errorcount = $Error.Count
                 try{
@@ -986,30 +998,119 @@ param(
     }
 }
 
-function Expand-Config {
-    param($Config, $Path = "PSConfig")
-    
-    if(!$Config -or ($Config -is [hashtable] -and $Config.Keys.Count -eq 0)){
-        return
+function ConvertTo-Config {
+param(
+    [Parameter(ValueFromPipeline = $true)] $Object,
+    [Parameter(DontShow = $true)] [string] $Name,
+    [Parameter(DontShow = $true)] [int] $IndentLevel = 0
+)
+
+    if($Name){
+        $open = "$Name ="
     }
-    elseif($Config -isnot [hashtable]){
-        foreach($eelement in $Config){
-            [pscustomobject] @{
-                    Path = $Path
-                    Value = $element
-                }
-        }
-        return
+    else{
+        $open = ""
     }
-    
-    foreach($key in $Config.Keys){
-        if($Config.$key -is [hashtable]){
-            Expand-Config -config $Config.$key -path ($Path + "." + $key)
-        }
-        else{
-            foreach($element in $Config.$key){
-                Expand-Config -config $element -path ($Path + "." + $key)
-            }
+
+    switch ($Object.gettype().fullname){
+        "System.Object[]"    {
+                                $open += "@("
+                                $joinchar = ", "
+
+                                $multiline = $false
+                                $strelements = @()
+                                foreach($elem in $Object){
+                                    $strelem = ConvertTo-Config -Object $elem                                
+
+                                    if($elem -is [System.Object[]]){
+                                        $strelem = "," + $strelem
+                                    }
+
+                                    $strelements += $strelem
+                                    if(!$multiline -and $strelem -match '\n'){
+                                        $multiline = $true
+                                    }
+                                }
+
+                                if($multiline){
+                                    $joinchar += "`r`n"
+                                    $strelements = @($open) +
+                                                    (($strelements | &{process{
+                                                        $parts = $_ -split "\r\n"
+                                                        ($parts | &{process{" " * 4 + $_}}) -join "`r`n"
+                                                    }}) -join $joinchar) +
+                                                    ")"
+                                    $strelements | &{process{
+                                                    $parts = $_ -split "`r`n"
+                                                    ($parts | &{process{" " * $IndentLevel * 4}}) -join "`r`n"
+                                                }}
+                                }
+                                else{
+                                    " " * $IndentLevel * 4 + $open + ($strelements -join $joinchar) + ")"
+                                }
+                            }
+
+        "System.Collections.Hashtable" {
+                                 $open += "@{"
+
+                                 $out = @(" " * $IndentLevel * 4 + $open)
+
+                                 foreach($key in $Object.keys){
+                                    $out += ConvertTo-Config -Object $Object.$key -IndentLevel ($IndentLevel + 1) -Name $key
+                                 }
+
+                                 $out += " " * $IndentLevel * 4 + "}"
+                                 $out -join "`r`n"
+                            }
+
+        "System.Collections.Specialized.OrderedDictionary" {
+                                 $open += "{[ordered] @{"
+
+                                 $out = @(" " * $IndentLevel * 4 + $open)
+
+                                 foreach($key in $Object.keys){
+                                    $out += ConvertTo-Config -Object $Object.$key -IndentLevel ($IndentLevel + 1) -Name $key
+                                 }
+
+                                 $out += " " * $IndentLevel * 4 + "}}"
+                                 $out -join "`r`n"
+                            }
+
+        "System.String" {
+                                " " * $IndentLevel * 4 + $open + """$Object"""
+                            }
+
+        "System.Management.Automation.ScriptBlock" {
+                                " " * $IndentLevel * 4 + $open + "{$Object}"
+                            }
+
+        "System.DateTime" {
+                                " " * $IndentLevel * 4 + $open + "{[DateTime] ""$Object""}"
+                            }
+
+        "System.Int32" {
+                                " " * $IndentLevel * 4 + $open + "$Object"
+                            }
+
+        "System.Double" {
+                                " " * $IndentLevel * 4 + $open + "$Object"
+                            }
+
+        "System.Management.Automation.PSCustomObject" {
+                                 $open += "{[PSCustomObject] @{"
+
+                                 $out = @(" " * $IndentLevel * 4 + $open)
+
+                                 foreach($prop in $Object.psobject.properties.name){
+                                    $out += ConvertTo-Config -Object $Object.$prop -IndentLevel ($IndentLevel + 1) -Name $prop
+                                 }
+
+                                 $out += " " * $IndentLevel * 4 + "}}"
+                                 $out -join "`r`n"
+                            }
+
+        default {
+            throw {"Couldn't convert datatype at '$Name' : '$($Object.gettype().fullname)' - $Object"}
         }
     }
 }
@@ -1096,6 +1197,7 @@ param(
     [string] $Path,
     [string[]] $Extension = ("ps1", "psm1"),
     [string[]] $Exclude = "wxyz",
+    [string[]] $ExcludePath,
     [switch] $SortByDate,
     [switch] $CaseSensitive
 )
@@ -1115,21 +1217,137 @@ param(
         $selectstringsplatting.CaseSensitive = $true
     }
 
-    Get-ChildItem -Path $Path -Include $include -Exclude $Exclude -Recurse |
+    Get-ChildItem -Path $Path -Include $include -Exclude $Exclude -Recurse | &{process{
+            $dir = $_.DirectoryName
+            if(!($ExcludePath | &{process{if($dir -like $_){$_}}})){
+                $_
+            }}
+        } |
         Select-String -Pattern $Pattern @selectstringsplatting |
             Select-Object -Property Path, @{n="LastWriteTime"; e = {(get-item -Path $_.Path).LastWriteTime}}, LineNumber, Line |
                 Sort-Object -Property $Sortparam
+}
+
+function Convert-CustomObjectHash {
+<#
+.Synopsis
+   Merges properties / keys of the Secondary object / hashtable to the Primary object / hashtable.
+.DESCRIPTION
+   This function takes all properties or keys of the Secondary object / hashtable into the Primary object or hashtable. By default only those properties / keys are merge that doesn't exist in the Primary object / hashtable.
+   If the -Force switch is used then the properties / keys of the Secondary object / hashtable always merged to the Primary.
+.EXAMPLE
+    $o = @{ObjProp = [pscustomobject] @{Prop1 = 1; Prop2 = 2}; HashProp = @{Key1 = 1; Key2 = 2}}; $result = Convert-CustomObjectHash -Object $o
+
+    Because parameter -To is not specified, the conversion will be from [pscustomobject] to [hashtable], including all properties that are also [pscustomobject].
+.EXAMPLE
+    $o = @{ObjProp = [pscustomobject] @{Prop1 = 1; Prop2 = 2}; HashProp = @{Key1 = 1; Key2 = 2}}; $result = Convert-CustomObjectHash -Object $o -to pscustomobject
+
+    Because the -To parameter is [pscustomobject], only the HashProp of the input object will be converted to [PScustomobject].
+.INPUTS
+   hashtables or pscustomobjects
+.OUTPUTS
+   The converted input object
+#>
+[cmdletbinding()]
+param(
+    # Object to convert.
+    [Parameter(Mandatory = $true, ValueFromPipeline = $true)][AllowNull()] [object]$Object,
+    # Force conversion to this datatype.
+    [Parameter()] [ValidateSet('hashtable', 'pscustomobject')] [AllowNull()] [string] $To,
+    # Recursion depth, by default 5.
+    [Parameter()][int] $Depth = 5,
+    [Parameter(DontShow = $true)][int] $_currentdepth = 0
+)
+process{
+    if($null -eq $Object){
+        return
+    }
+    
+    if($Object -isnot [hashtable] -and $Object -isnot [System.Management.Automation.PSCustomObject]){
+        return $Object
+    } 
+
+    if($_currentdepth -gt $Depth){
+        return
+    }
+
+    if(!$PSBoundParameters.to){
+        if($Object -is [hashtable]){
+            $To = 'pscustomobject'
+        }
+        elseif($Object -is [System.Management.Automation.PSCustomObject]){
+            $To = 'hashtable'
+        }
+        else{
+            return
+        }
+    }    
+
+    if($To -eq 'hashtable'){
+        $newObject = @{}
+
+        foreach($prop in $Object.psobject.properties){
+            $newObject.($prop.name) = Convert-CustomObjectHash -Object $prop.value -To $To -_currentdepth ($_currentdepth + 1) -Depth $Depth
+        }
+        $newObject
+    }
+    elseif($To -eq 'pscustomobject'){
+        $Object = [pscustomobject] $Object
+        foreach($prop in $Object.psobject.properties){
+            $Object.($prop.name) = Convert-CustomObjectHash -Object $prop.value -To $To -_currentdepth ($_currentdepth + 1) -Depth $Depth
+        }
+        $Object
+    }
+}
 }
 #endregion
 
 #region Property management
 function Update-Property {
+<#
+.Synopsis
+   Updates properties of objects or values of hashtables.
+.DESCRIPTION
+   This function creates or sets properties of objects or values of hashtables. If a property or key doesn't exist then the function will create that and assign the given value to it. 
+   If the property or key exists then - depending on the type of its value - it's going to do one of the following actions:
+    - if the existing value is an integer and the new value is an integer then it adds the new value to the existing one
+    - in other cases the function converts the existing value to a collection if it's not already that and adds the new value as a new element to that collection. If the new value is already
+      among the existing elements then it will skip adding the new element to it.
+    - if the -Force switch is used then the existing value is going to be overwritten by the new value
+
+    This function is meant to extend the scope and functionality of Add-Member. 
+.EXAMPLE
+   $splatting = @{}; Update-Property -Object $splatting -PropName DisplayName -Value 'Tibor Soos'; Update-Property -Object $splatting -PropName Replace -Value @{proxyAddresses = "SMTP:Soos.Tibor@hotmail.com"}
+
+   In this example we prepare a hashtable $splatting for splatting the Set-ADUser cmdlet to set the displayname and the proxyAddresses attribute of an AD user object.
+.EXAMPLE
+   Update-Property -Object $splatting -PropName Replace -Value @{proxyAddresses = "smtp:SoosTibor@hotmail.com"} ; $splatting.Replace
+
+   In this example we add a secondary SMTP address to the splatting hashtable under its Replace key.
+.EXAMPLE
+   Update-Property -Object $splatting.Replace -PropName proxyAddresses -Value "smtp:tibor.soos@hotmail.com" -PassThru
+
+   In this example we add another secondary SMTP address to the splatting hashtable directly under its Replace.proxyAddresses key. Using the -PassThru switch we get back the updates hashtable under the Replace key.
+.EXAMPLE
+    $obj = [pscustomobject] @{Prop1 = "Text"; Prop3 = "Obsolete"}; Update-Property -Object $obj -PropName Prop2; Update-Property -Object $obj -PropName Prop3 -Value Fresh -Force; Update-Property -Object $obj -PropName Prop1 -Value NewText -PassThru
+
+    In this example we update an object in $obj 3 times. First we create a new property Prop2, then we overwrite the property 'Prop3' to 'Fresh', then we extend the existing value of Prop1 by converting it to a collection and adding 'NewText' to it as a new element.
+.INPUTS
+   hashtable or psobject
+.OUTPUTS
+   The updated input object if the -PassThru switch is used.
+#>
 [cmdletbinding()]
 param(
+    # Input object, either a hashtable or a PSObject
     [psobject] $Object,
+    # Name of the property or key to update
     [string]   $PropName,
+    # The new value to include in the update process. By default it's 1.
     [psobject] $Value = 1,
+    # Switch to output the update input object
     [switch]   $PassThru,
+    # Switch to do an overwrite
     [switch]   $Force
 )
     if($null -eq $Object){
@@ -1157,7 +1375,7 @@ param(
     elseif($Object.$PropName -is [collections.ilist]){
         if($Object.$PropName -is [collections.ilist] -and $Object.$PropName.count -gt 0 -and $Object.$PropName[0] -is [hashtable]){
             if($Value -is [collections.ilist] -and $Value.count -gt 0 -and $Value[0] -is [hashtable]){
-                $existingKeys = $Object.$PropName | ForEach-Object {$_.Keys}
+                $existingKeys = $Object.$PropName | &{process{ {$_.Keys}}}
 
                 if($existingKeys -notcontains ($Value.keys | Select-Object -First 1)){
                     $Object.$PropName += $Value
@@ -1220,95 +1438,367 @@ param(
 }
 
 function Search-Property {
-    param(
-        [parameter(Position=0)][string] $Pattern = ".",
-        [parameter(ValueFromPipeline)][psobject[]] $Object,
-        [switch] $SearchInPropertyNames,
-        [switch] $ExcludeValues,
-        [switch] $LiteralSearch,
-        [string[]] $Property = "*",
-        [string[]] $ExcludeProperty,
-        [string] $ObjectNameProp,
-        [switch] $CaseSensitive,
-        [switch] $IgnoreCollections
-    )
-    begin{
-        if($LiteralSearch -and $Pattern -ne "."){
-            $Pattern = [regex]::Escape($Pattern)            
-        }
+<#
+.Synopsis
+   Searches for patterns in properties of objects or keys of hashtables.
+.DESCRIPTION
+   This function primarily searches the regex pattern among properties of objects or keys of hashtables. If the -SearchInPropertyNames is specified then it searches among property names / keys as well.
+   If the -ExcludeValues switch is used then it skips the search in values of properties / keys.
+   If we want a literal search and not a regex pattern matching then the -LiteralSearch switch can be used. If we want to restrict search in certain properties / keys, then we can specify those names at the -Propery parameter.
+   If the pattern is in the form of '<name>', the the function searches for all the properties / keys where the value matches the value of property / key with name 'name'.
+   If we want to skip certain properties / keys, then we can specify those at the -ExcludeProperty parameter.
+   By default the search is case insensitive, we can make it case sensitive by specifying the -CaseSensitive switch.
+   By default the search is done among those properties / keys which contain a collection of values. To skip searching in those properties we can specify the -IgnoreCollections switch.
+   By default the search goes into the immediate properties / keys of the input objects. We can specify the search depth by assigning a value to the -Depth parameter.
+   The result contains custom objects having an 'Object' property which is meant to be an identifyer of the input objects. That is by default the result of the ToString() method invoking on the input object. 
+   If we want to have that identifier of one of the properties of the input object then we can specify that property name / key in the -ObjectNameProp parameter.
+.EXAMPLE
+   Get-Item -Path C:\Windows\notepad.exe | Search-Property -Pattern '<basename>' -Depth 2 -ObjectNameProp name -CaseSensitive -IgnoreCollections
 
-        if($CaseSensitive){
-            $Pattern = "(?-i)$Pattern"
-        }
+   In this example we search the base name of the notepad.exe file object (notepad) among its properties and the properties of properties (-Depth 2) in a case sensitive way, so the VersionInfo.OriginalFilename property is not returned, because there the value is NOTEPAD.EXE.MUI.
+   The first column of the result set contain the name of the file (notepad.exe) and not the full path, because we specified that the object name should be taken from property 'name'.
+.EXAMPLE
+   @{One = "MyValue"; KeyTwo = 'One'; Coll = 'one', 'two'; KeyThree = @{SubKey1 = 'One'; SubKey2 = [pscustomobject]@{Prop1 = 'One'; Prop2One = 'Text'}}} | Search-Property -Pattern '^One$' -SearchInPropertyNames -Depth 3 -IgnoreCollections
 
-        $origpattern = $Pattern
+   In this example we search for the exact string 'One' among all the keys of the hashtable specified in the command line max 3 levels deep. We skip the key 'Coll', because that contains a collection and we specified the -IgnoreCollections switch. The result also contains property 'Prop1' of the object under the key 'Subkey2'. 
+.INPUTS
+   hashtable or psobject
+.OUTPUTS
+   Collection of custom objects having an Object, Name and Value properties.
+#>
+[cmdletbinding()]
+param(
+    # Regex pattern to search for       
+    [parameter(Position=0)][string] $Pattern = ".",
+
+    # Input object or hashtable
+    [parameter(ValueFromPipeline)][psobject[]] $Object,
+
+    # Extend the search to include property / key names
+    [switch] $SearchInPropertyNames,
+
+    # Skip searching among property / key values
+    [switch] $ExcludeValues,
+
+    # Use the pattern as a literal search (no regex metacharacters)
+    [switch] $LiteralSearch,
+
+    # Property / key names to search in (by default all all properties / keys are included)
+    [string[]] $Property = "*",
+
+    # Property / key names to exclude to search in
+    [string[]] $ExcludeProperty,
+
+    # Take the identifier of the object / hashtable from this property / key
+    [string] $ObjectNameProp,
+
+    # Make the search case-sensitive
+    [switch] $CaseSensitive,
+
+    # Ignore properties / keys that contain collection of values
+    [switch] $IgnoreCollections,
+
+    # Depth of the recursive search, by default 1 - shallow search
+    [int] $Depth = 1,
+    [Parameter(DontShow = $true)] [int] $_Depth = 1,
+    [Parameter(DontShow = $true)] [string[]] $_ParentNames,
+    [Parameter(DontShow = $true)] [string] $_ObjectName
+)
+begin{
+    if($LiteralSearch -and $Pattern -ne "."){
+        $Pattern = [regex]::Escape($Pattern)            
     }
-    process{
-        foreach($o in $Object){
-            if(!$LiteralSearch -and $origpattern  -match "<[^>]+>"){
+
+    if($CaseSensitive){
+        $Pattern = "(?-i)$Pattern"
+    }
+
+    $origpattern = $Pattern
+}
+process{
+    foreach($o in $Object){
+        if(!$o){
+            continue
+        }
+
+        if($_ObjectName){
+            $objectName = $_ObjectName
+        }
+        elseif($ObjectNameProp){
+            $objectName = $o.$ObjectNameProp
+        }
+        else{
+            $objectName = $o.ToString()
+        }
+
+        if(!$IgnoreCollections -and $o -is [collections.ilist]){
+            $index = 0
+
+            foreach($elem in $o){
+                $parentNames = "$_ParentNames[$index]"
+
+                if($elem -match $Pattern){
+                    [pscustomobject]@{
+                        Object = $objectName
+                        Name = $parentNames
+                        Value = $elem
+                    }
+                }
+
+                Search-Property -Object $elem -Pattern $origpattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property:$Property -ExcludeProperty:$ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -_ParentNames $parentNames -_ObjectName $objectName
+                $index++
+            }
+        }
+        else{
+            if(!$LiteralSearch -and $origpattern -match "<[^>]+>"){
                 $Pattern = [regex]::Replace($origpattern, "<([^>]+)>", {[regex]::Escape($o.($args[0].value -replace "<|>"))})
             }
-            $o.psobject.properties | 
-                Where-Object {
-                    $PropName = $_.name
-                    $_.membertype -ne 'AliasProperty' -and 
+
+            if($o -is [System.Collections.Hashtable] -or $o -is [System.Collections.Specialized.OrderedDictionary]){
+                $properties = $o.getenumerator() | Select-Object -Property Name, Value
+            }
+            else{
+                $properties = $o.psobject.properties
+            }
+
+            foreach($prop in ($properties | Sort-Object -Property Name)){
+                $PropName = $prop.Name
+
+                if(
+                    $prop.membertype -ne 'AliasProperty' -and 
                     (
-                        $(if(!$ExcludeValues){$_.value -as [string] -and $_.value -match $Pattern}) -or
-                        $(if($SearchInPropertyNames){$_.value -as [string] -and $_.name -match $Pattern})
+                        $(if(!$ExcludeValues){$prop.value -as [string] -and $prop.value -match $Pattern}) -or
+                        $(if($SearchInPropertyNames){$prop.value -as [string] -and $prop.name -match $Pattern})
                     ) -and
-                    !($ExcludeProperty | Where-Object {$PropName -like $_}) -and
-                    ($Property | Where-Object {$PropName -like $_}) -and
-                    (!$IgnoreCollections -or $_.value -isnot [collections.ilist])
-                } | Sort-Object -Property Name | Select-Object -Property @{n = "Object"; e = {if($ObjectNameProp){$o.$ObjectNameProp}else{$o.tostring()}}}, Name, Value
+                    !($ExcludeProperty | &{process {if($PropName -like $_){$_}}}) -and
+                    ($Property | &{process {if($PropName -like $_){$_}}}) -and
+                    (!$IgnoreCollections -or $prop.value -isnot [collections.ilist])
+                ){
+                    $propFullName = ($_ParentNames + $PropName) -join "."
+                    Select-Object -InputObject $prop -Property @{n = "Object"; e = {$objectName}}, @{n = "Name"; e = {$propFullName}}, Value
+                }
+                    
+                if($prop.value -and $prop.value.gettype().fullname -notin 'system.string', 'system.int32' -and $_Depth -lt $Depth){
+                    if($prop.value -is [collections.ilist]){
+                        Search-Property -Object (,$prop.value) -Pattern $pattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property $Property -ExcludeProperty $ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -_ParentNames ($_ParentNames + $PropName) -_ObjectName $objectName
+                    }
+                    else{
+                        Search-Property -Object $prop.value -Pattern $pattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property $Property -ExcludeProperty $ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -_ParentNames ($_ParentNames + $PropName) -_ObjectName $objectName
+                    }
+                }
+            }
         }
     }
 }
+}
 
-function Compare-ObjectProperty {
+function Compare-Property {
+<#
+.Synopsis
+   Compares properties of objects or keys of hashtables.
+.DESCRIPTION
+   This function compares properties of two objects or keys of two hashtables recursively and returns a set of custom objects describing the differences. 
+.EXAMPLE
+    $f1 = Get-Item C:\Windows\notepad.exe; $f2 = Get-Item C:\Windows\System32\notepad.exe; Compare-Property -ReferenceObject $f1 -DifferenceObject $f2
+
+    This expression compares the properties of 2 notepad.exe files and returns all properties that are different.
+.EXAMPLE
+   $f1 = Get-Item C:\Windows\notepad.exe; $f2 = Get-Item C:\Windows\System32\notepad.exe; Compare-Property -ReferenceObject $f1 -DifferenceObject $f2 -IncludeEqual -ExcludeDifferent -Exclude PS*
+
+   In this example we compare the properties of the two notepad.exe file objects, exclude the properties that are different but include properties that are equal. We also exclude all properties whose name start with PS.
+.EXAMPLE
+    Compare-Property -ReferenceObject @{Name = 'First'; Number = 1; Array = 1,2; RefEmpty = $null} -DifferenceObject @{Name = 'Second'; Number = 2; Array = 2,3; DiffEmpty = @()} -Hide Empty -NameProperty Name -Exclude Name
+
+    In this example we compare the keys of two hashtables. We exclude those properties that contain 'empty' values ($null, empty array, empty hashtables, System.DBNull) in either input objects. 
+    We also include in the column names the content of the Name property of the respective hashtables, but exclude the Name property from the differences.
+.INPUTS
+   hashtable or psobject
+.OUTPUTS
+   Collection of custom objects having a Property, Relation and 'r:<reference object ID>', 'd:<difference object ID>' properties.
+#>
+[cmdletbinding()]
 param(
-    $ReferenceObject,
-    $DifferenceObject,
+    # The reference object or hashtable
+    [Parameter(Mandatory = $true)] [AllowNull()][psobject] $ReferenceObject,
+    # The difference object or hashtable
+    [Parameter(Mandatory = $true)] [AllowNull()][psobject] $DifferenceObject,
+    # Include equal properties/keys in the result
     [switch] $IncludeEqual,
+    # Exclud differences from the result
     [switch] $ExcludeDifferent,
+    # Include properties/keys to compare
     [string[]] $Property = "*",
+    # Exclude properties/keys to compare
     [string[]] $Exclude,
-    [string] $NameProperty,
+    # Use this property or the result of executing the scriptblock as the name for the objects
+    [ValidateScript({$_ -is [string] -or $_ -is [scriptblock]})] [psobject] $NameProperty,
+    # Hide certain type of empty properties
     [string] [ValidateSet('None','Empty','NonEmpty','BothEmpty')] $Hide = 'None',
-    [Parameter(Dontshow = $true)][string[]] $_refs,
-    [Parameter(Dontshow = $true)][string[]] $_diffs
+    [Parameter(Dontshow = $true)][int] $_Depth = 1,
+    # Maximum depth of recursion, default is 5
+    [int] $MaxDepth = 5
 )
 
-    $allprops = @()
-    $rp = @()    
-    $dp = @()    
-    $rs = 'r:'
-    $ds = 'd:'
+    $equal = $null
+    $rObjName = ''
+    $dObjName = ''
 
-    $rID = $null
-    $dID = $null
+    if($null -eq $ReferenceObject -and $null -eq $DifferenceObject){
+        $rObjName = '$null'
+        $dObjName = '$null'
+        $equal = "=="
+    }
+    elseif($null -eq $ReferenceObject -or $null -eq $DifferenceObject){
+        if($null -eq $ReferenceObject){
+            $rObjName = '$null'
+            $equal = "=>"
+        }
+        else{
+            $dObjName = '$null'
+            $equal = "<="
+        }
+    }
+    elseif($ReferenceObject.GetType().FullName -ne $DifferenceObject.GetType().FullName -and $PSBoundParameters.ContainsKey('_Depth')){
+        $equal = "<>"
+    }
+    elseif($ReferenceObject -is [scriptblock] -and $PSBoundParameters.ContainsKey('_Depth')){
+        if($ReferenceObject.ToString() -eq $DifferenceObject.tostring()){
+            $equal = "=="
+        }
+        else{
+            $equal = "<>"
+        }
+    }
+    elseif($ReferenceObject -is [datetime] -and $PSBoundParameters.ContainsKey('_Depth')){
+        if($ReferenceObject -eq $DifferenceObject){
+            $equal = "=="
+        }
+        else{
+            $equal = "<>"
+        }
+    }
+    elseif($ReferenceObject.gettype().fullname -in 'System.RuntimeType', 'System.Reflection.RuntimeAssembly'){
+        return
+    }
+    elseif($ReferenceObject -is [System.IO.FileSystemInfo] -and $PSBoundParameters.ContainsKey('_Depth')){
+        if($ReferenceObject.fullname -eq $DifferenceObject.fullname){
+            $equal = "=="
+        }
+        else{
+            $equal = "<>"
+        }
+    }
+    elseif($ReferenceObject -is [string]){
+        if($ReferenceObject -eq $DifferenceObject){
+            $equal = "=="
+        }
+        else{
+            $equal = "<>"
+        }
+    }
+    elseif($ReferenceObject -as [double] -and $DifferenceObject -as [double]){
+        if($ReferenceObject -eq $DifferenceObject){
+            $equal = "=="
+        }
+        else{
+            $equal = "<>"
+        }
+    }
+    elseif($ReferenceObject -is [system.collections.ilist]){
+        if($ReferenceObject.psbase.count -ne $DifferenceObject.psbase.count){
+            $equal = "<>"
+        }
+        else{
+            $equal = "=="
+            for($i = 0; $i -lt $ReferenceObject.psbase.count; $i++){
+                $diff = Compare-Property -ReferenceObject $ReferenceObject[$i] -DifferenceObject $DifferenceObject[$i] -_Depth ($_Depth + 1)
+                if($diff){
+                    $equal = "<>"
+                    break
+                }
+            }
+        }
+    }
 
-    if($null -ne $referenceobject){    
+    if($NameProperty){
+        if($NameProperty -is [string]){
+            if(!$rObjName){
+                $rObjName = $ReferenceObject.$NameProperty
+            }
+            if(!$dObjName){
+                $dObjName = $DifferenceObject.$NameProperty
+            }
+        }
+        else{
+            if(!$rObjName){
+                $rObjName = $ReferenceObject | &{process{ & $NameProperty}}
+            }
+            if(!$dObjName){
+                $dObjName = $DifferenceObject | &{process{ & $NameProperty}}
+            }
+        }
+    }
+    else{
+        if(!$rObjName){
+            $rObjName = $ReferenceObject.tostring()
+        }
+        if(!$dObjName){
+            $dObjName = $DifferenceObject.tostring()
+        }
+    }
+    $rs = "r:" + $rObjName
+    $ds = "d:" + $dObjName
+
+    if(!$equal -and $MaxDepth -lt $_Depth){
+        if($ReferenceObject.tostring() -eq $DifferenceObject.ToString()){
+            $equal = "=="
+        }
+        else{
+            $equal = "<>"
+        }
+    }
+    
+    if($equal){
+        if($equal -ne '=='){
+            [pscustomobject] @{    
+                Property = "<value>"
+                Relation = $equal    
+                $rs = $ReferenceObject
+                $ds = $DifferenceObject
+            }    
+        }
+    }
+    else{
+        if($ReferenceObject -is [hashtable] -or $ReferenceObject -is [System.Collections.Specialized.OrderedDictionary]){
+            $ReferenceObject = [pscustomobject] $ReferenceObject
+            $DifferenceObject = [pscustomobject] $DifferenceObject
+        }
+
+        if($NameProperty){
+            if($NameProperty -is [string]){
+                $rObjName = $ReferenceObject.$NameProperty
+                $dObjName = $DifferenceObject.$NameProperty
+            }
+            else{
+                $rObjName = $ReferenceObject | &{process{ & $NameProperty}}
+                $dObjName = $DifferenceObject | &{process{ & $NameProperty}}
+            }
+        }
+        else{
+            $rObjName = $ReferenceObject.tostring()
+            $dObjName = $DifferenceObject.tostring()
+        }
+        $rs = "r:" + $rObjName
+        $ds = "d:" + $dObjName
+
         $rp = $referenceobject.psobject.Properties |    
-                Where-Object {$_.membertype -ne 'AliasProperty'} |    
+                &{process{ if($_.membertype -ne 'AliasProperty'){$_}}} |    
                     Select-Object -ExpandProperty Name
 
         $allprops = @($rp)   
-         
-        if($NameProperty){
-            $objname = $ReferenceObject.$NameProperty
-        }
-        else{
-            $objname = $referenceobject.tostring()
-        }
-        $rs = "r:" + $objname
 
-        $rID = $referenceobject.gettype().fullname + "-" + $(if($ReferenceObject.fullname){$ReferenceObject.fullname}else{$ReferenceObject.gethashcode()}) + 
-                $rp
-    }
-
-    if($null -ne $differenceobject){    
         $dp = $differenceobject.psobject.Properties |
-                Where-Object {$_.membertype -ne 'AliasProperty'} |
+                &{process {if($_.membertype -ne 'AliasProperty'){$_}}} |
                     Select-Object -ExpandProperty Name
         
         foreach($p in $dp){    
@@ -1317,136 +1807,349 @@ param(
             }
         }
 
-        if($NameProperty){
-            $objname = $DifferenceObject.$NameProperty
-        }
-        else{
-            $objname = $DifferenceObject.tostring()
-        }
+        $allprops = $allprops | &{process {
+                $pp = $_
+                if(($Property | &{process {if($pp -like $_){$_}}}) -and !($Exclude | &{process{if($pp -like $_){$_}}})) {$_}
+            }} | Sort-Object
 
-        $ds = "d:" + $objname
+        foreach($p in $allprops){        
+            if($rp -contains $p -and $dp -contains $p){
+                $ra = $ReferenceObject.$p
+                $da = $DifferenceObject.$p
 
-        $dID = $differenceobject.gettype().fullname + "-" + $(if($DifferenceObject.fullname){$DifferenceObject.fullname}else{$DifferenceObject.gethashcode()}) + 
-                $dp
-    }
-
-    $allprops = $allprops | Where-Object {
-            $pp = $_
-            ($Property | Where-Object {$pp -like $_}) -and !($Exclude | Where-Object {$pp -like $_})
-        } | Sort-Object
-    
-    if($_refs -eq $rID -or $_diffs -eq $dID){
-        return
-    }
-
-    if($ra -and $ra.gettype().fullname -in 'System.RuntimeType', 'System.Reflection.RuntimeAssembly'){
-        return
-    }
-
-    $_refs += $rID
-    $_diffs += $dID
-
-    foreach($p in $allprops){        
-        $ra = $referenceobject.$p
-        $da = $differenceobject.$p
-
-        if($referenceobject -is [ScriptBlock] -and $p -in 'Id', 'StartPosition'){
-            continue            
-        }
-
-        if($differenceobject -is [ScriptBlock] -and $p -in 'Id', 'StartPosition'){
-            continue            
-        }
-
-        $raempty = $null -eq $ra -or
-                    '' -eq $ra -or
-                    (($ra -is [collections.ilist] -or $ra -is [Collections.IDictionary]) -and $ra.count -eq 0) -or
-                    $ra -is [System.DBNull]
-
-        $daempty = $null -eq $da -or    
-                    '' -eq $da -or    
-                    (($da -is [collections.ilist] -or $da -is [Collections.IDictionary]) -and $da.count -eq 0) -or
-                    $ra -is [System.DBNull]
-
-        $rtype = if($null -eq $ra){"NULL"}else{$ra.gettype().fullname}
-        $dtype = if($null -eq $da){"NULL"}else{$da.gettype().fullname}
-
-        $equal = $null
-        
-        if($hide -eq 'Empty' -and ($raempty -or $daempty)){    
-            continue
-        }    
-        elseif($hide -eq 'BothEmpty' -and $raempty -and $daempty){    
-            continue    
-        }    
-        elseif($hide -eq 'NonEmpty' -and (!$raempty -or !$daempty)){    
-            continue    
-        }
-
-        if(($raempty -and !$daempty) -or ($dp -contains $p -and $rp -notcontains $p)){    
-            $equal = "=>"    
-        }    
-        elseif((!$raempty -and $daempty) -or ($rp -contains $p -and $dp -notcontains $p)){    
-            $equal = "<="    
-        }    
-        elseif($rtype -ne $dtype){    
-            $equal = "<>"    
-        }    
-        elseif($ra -is [collections.idictionary]){    
-            $ra = @($ra.GetEnumerator())    
-            $da = @($da.GetEnumerator())
-
-            if(Compare-Object -ReferenceObject $ra -DifferenceObject $da -Property Key, Value){    
-                $equal = "<>"    
-            }    
-            else{    
-                $equal = "=="    
-            }    
-        }
-        
-        if(!$equal){
-            if($ra.psbase.count -and $da.psbase.count -and $ra -isnot [collections.ilist] -and $ra.psobject.methods.name -contains 'GetEnumerator' -and $da.psobject.methods.name -contains 'GetEnumerator'){
-                $ra = $ra.getenumerator() | Select-Object -Property *
-                $da = $da.getenumerator() | Select-Object -Property *
+                $diff = Compare-Property -ReferenceObject $ra -DifferenceObject $da -Property $Property -Exclude $Exclude -_Depth ($_Depth + 1)
+                if($diff){
+                    $equal = "<>"
+                }
+                else{
+                    $equal = "=="
+                }
+            }
+            elseif($rp -contains $p){
+                $equal = "<="
+                $ra = $ReferenceObject.$p
+                $da = $null
+            }
+            else{
+                $equal = "=>"
+                $da = $DifferenceObject.$p
+                $ra = $null
             }
 
-            if($ra -is [collections.ilist]){    
-                if(Compare-Object -ReferenceObject $ra -DifferenceObject $da){    
-                    $equal = "<>"    
-                }    
-                else{    
-                    $equal = "=="    
-                }    
-            }    
-        }
-        
-        if(!$equal){
-            if($ra -and $ra -is [scriptblock] -or $ra -is [System.Management.Automation.Language.ScriptBlockAst]){
-                $equal = if($ra.tostring() -eq $da.tostring()){"=="}else{"<>"}    
-            }
-            elseif($ra -and $da -and $ra -isnot [string] -and !$ra.gettype().IsValueType){
-                if(Compare-ObjectProperty -ReferenceObject $ra -DifferenceObject $da -_refs $_refs -_diffs $_diffs){    
-                    $equal = "<>"    
-                }    
-                else{    
-                    $equal = "=="    
-                }    
-            }               
-            else{    
-                $equal = if($ra -eq $da){"=="}else{"<>"}    
-            }
-        }
+            $raempty = $null -eq $ra -or
+                        '' -eq $ra -or
+                        (($ra -is [collections.ilist] -or $ra -is [Collections.IDictionary]) -and $ra.count -eq 0) -or
+                        $ra -is [System.DBNull]
 
-        if((!$Excludedifferent -and $equal -ne '==') -or ($includeequal -and $equal -eq '==')){    
-            [pscustomobject] @{    
-                Property = $p    
-                Relation = $equal    
-                $rs = $ReferenceObject.$p
-                $ds = $DifferenceObject.$p
-            }    
+            $daempty = $null -eq $da -or    
+                        '' -eq $da -or    
+                        (($da -is [collections.ilist] -or $da -is [Collections.IDictionary]) -and $da.count -eq 0) -or
+                        $ra -is [System.DBNull]
+
+            if((!$Excludedifferent -and $equal -ne '==') -or ($includeequal -and $equal -eq '==')){    
+                $dummy = 0
+                if(($Hide -eq 'BothEmpty' -and $raempty -and $daempty) -or
+                    ($Hide -eq 'Empty' -and ($raempty -or $daempty)) -or
+                    ($Hide -eq 'NonEmpty' -and (!$raempty -or !$daempty))){
+                    continue
+                } 
+                 
+                [pscustomobject] @{    
+                    Property = $p    
+                    Relation = $equal    
+                    $rs = $ra
+                    $ds = $da
+                }    
+            }
         }
     }
 }
+
+function Get-Property {
+<#
+.Synopsis
+   Returns the value of object(s) that is available under the path(s) specified.
+.DESCRIPTION
+   This function gets the value of a property or key under a hierarchy of properties and keys and/or under the index of collections.
+.EXAMPLE
+    Get-ChildItem C:\Windows\system32\*.exe | Get-Property -PropPath "VersionInfo.CompanyName", "PSDrive.Provider.Name" -ObjectNameProperty Name
+
+    Gets the VersionInfo.CompanyName and PSDrive.Provider.Name properties of all EXE files under c:\windows\system32 folder. The result will have the Name of each files under the Object column.
+.EXAMPLE
+   $h = @{Name = "MyHashTable"; Array = @{n = 'First'; data = 'Text1'}, @{n = 'Second'; data = 'Text2'}}; Get-Property -Object $h -PropPath 'Array[1].data' -ValueOnly
+
+   In this example we get the 'Text2' from hashtable $h. In this case the -PropPath contains an index as well and because we used the -ValueOnly switch only the value of 'data' is returned.
+.INPUTS
+   hashtables or psobjects
+.OUTPUTS
+   Collection of custom objects having an Object, PropertyPath, PropertyExists and Value properties, or only the value of the addressed property if the -ValueOnly switch is used.
+#>
+[cmdletbinding()]
+param(
+    # Input object to get its property
+    [Parameter(Mandatory = $true, ValueFromPipeline = $true)] [object[]] $Object,
+    # Path(s) of the value to query. This path is the full path to the value, including property names and key names and indexes.
+    [Parameter(Mandatory = $true)] [string[]] $PropPath,
+    # Property or key that can be used to reference the object. If not specified then the resullt of the ToString() method will be used.
+    [string] $ObjectNameProperty,
+    # Return only the addressed property/key value, not the complete custom object.
+    [switch] $ValueOnly
+)
+
+process{
+    foreach($obj in $Object){
+        if($null -eq $obj){
+            continue
+        }
+
+        foreach($pp in $PropPath){
+            $props = $pp -split "\.|(?<=.)(?=\[)"
+
+            $currentObj = $obj
+
+            $exists = $true
+
+            foreach($p in $props){
+                if($p -match "\[(\d+)\]"){
+                    $index = [int] $Matches[1]
+                }
+                elseif($p -match '\[["'']([^"'']+)["'']\]'){
+                    $p = $p -replace '\[["'']([^"'']+)["'']\]', '$1'
+                    $index = $null
+                }
+                else{
+                    $index = $null
+                    if($p -match '^([''"]).*\1$'){
+                        $p = $p -replace "^.(.*).$", '$1'
+                    }
+                }
+
+                if($null -ne $index){
+                    if($currentObj.count -gt $index){
+                        $currentObj = $currentObj[$index]
+                    }
+                    else{
+                        $currentObj = $null
+                        $exists = $false
+                        break
+                    }                    
+                }
+                elseif($null -ne $currentObj -and ((($currentObj -is [hashtable] -or $currentObj -is [System.Collections.Specialized.OrderedDictionary]) -and $currentObj.containskey($p)) -or ($currentObj.psobject.properties.count -and $currentObj.psobject.properties.name -contains $p))){
+                    $currentObj = $currentObj.$p
+                    if($null -eq $currentObj){
+                        $exists = $false
+                        break
+                    }
+                }
+                else{
+                    $exists = $false
+                    $currentObj = $null
+                    break
+                }
+            }
+
+            if($ValueOnly){
+                $currentObj
+            }
+            else{
+                [pscustomobject]@{
+                    Object = if($ObjectNameProperty){$obj.$ObjectNameProperty}else{$obj.tostring()}
+                    PropertyPath = $pp
+                    PropertyExists = $exists
+                    Value = if($exists){$currentObj}
+                }
+            }
+        }
+    }
+}
+}
+
+function Merge-Property {
+<#
+.Synopsis
+   Merges properties / keys of the Secondary object / hashtable to the Primary object / hashtable.
+.DESCRIPTION
+   This function takes all properties or keys of the Secondary object / hashtable into the Primary object or hashtable. By default only those properties / keys are merge that doesn't exist in the Primary object / hashtable.
+   If the -Force switch is used then the properties / keys of the Secondary object / hashtable always merged to the Primary.
+.EXAMPLE
+    $p = @{one = 1; three = 3}; $s = [pscustomobject]@{two = 2; three = 33; four = 4}; Merge-Property -Primary $p -Secondary $s -PassThru
+
+    Merges $s into $p. The updated hashtable will have its key 'three' remained to be 3.
+.EXAMPLE
+   $p = @{one = 1; three = 3}; $s = [pscustomobject]@{two = 2; three = 33; four = 4}; Merge-Property -Primary $p -Secondary $s -PassThru -Force
+
+   Merges $s into $p. The updated hashtable will have its key 'three' updated to be 33.
+.INPUTS
+   hashtables or psobjects
+.OUTPUTS
+   None or the updated object of the Primary object if the -PassThru switch is used.
+#>
+[cmdletbinding()]
+param(
+    # Primary object or hashtable to merge the properties of Secondary into.
+    [Parameter(Mandatory = $true)][PSobject] $Primary,
+    # Secondary object or hashtable whose properties or keys to be merged into Primary.
+    [Parameter(Mandatory = $true)][PSobject] $Secondary,
+    # If used then the updated primary objects is returned.
+    [switch] $PassThru,
+    # By default conflicting properties / keys are skipped. In case the -Force switch is used then conflicting properties / keys of Primary will be overwritten by properties / keys of Secondary.
+    [switch] $Force
+)
+
+    if($Primary -is [hashtable]){
+        if($Secondary -is [hashtable]){
+            foreach($key in $Secondary.keys){
+                if($Force -or !$Primary.containskey($key)){
+                    $Primary.$key = $Secondary.$key
+                }
+            }
+        }
+        else{
+            foreach($prop in $Secondary.psobject.properties.name){
+                if($Force -or !$Primary.containskey($prop)){
+                    $Primary.$prop = $Secondary.$prop
+                }
+            }
+        }
+    }
+    else{
+        if($Secondary -is [hashtable]){
+            foreach($key in $Secondary.keys){
+                if($Force -or $Primary.psobject.properties.name -notcontains $key){
+                    Add-Member -InputObject $Primary -MemberType NoteProperty -Name $key -Value $Secondary.$key -Force
+                }
+            }
+        }
+        else{
+            foreach($prop in $Secondary.psobject.properties.name){
+                if($Force -or $Primary.psobject.properties.name -notcontains $prop){
+                    Add-Member -InputObject $Primary -MemberType NoteProperty -Name $prop -Value $Secondary.$prop -Force
+                }
+            }
+        }
+    }
+
+    if($PassThru){
+        $Primary
+    }
+}
+
+function Expand-Property {
+<#
+.Synopsis
+   Expands all the properties or keys of the input object.
+.DESCRIPTION
+   Recursively dumps all properties or keys of the input object. By default it goes 1 level deep, but with the -MaxDepth parameter you can allow deep search.
+   If the -Condensed switch is used, only the leaf properties are returned (properties that don't have any further properties or which are at the -MaxDepth).
+.EXAMPLE
+   Expand-Property -Object $PSVersionTable -MaxDepth 2 -SkipTypesAdditional system.version
+
+   Expands the properties of the $PSVersionTable object down to 2 level deep, but any [system.version] type of property won't be expanded further.
+.EXAMPLE
+   Expand-Property -Object $PSVersionTable -MaxDepth 2 -SkipTypesAdditional system.version -Condensed
+
+   Expands only the last properties in the hiararchy of properties in the $PSVersionTable object down to 2 level deep, but any [system.version] type of property won't be expanded further.
+.INPUTS
+   hashtables or psobjects
+.OUTPUTS
+   Collection of custom objects having a PropertyPath, Type, and Value properties.
+#>
+[cmdletbinding(PositionalBinding=$false)]
+param(
+    # Input object or hashtable
+    $Object, 
+    # Maximum depth of recursion, default is 1
+    [int] $MaxDepth = 1,
+    [Parameter(Dontshow = $true)]$Path, 
+    [Parameter(Dontshow = $true)]$_currentDepth = 1,
+    # Only leaf properties / keys are returned
+    [switch] $Condensed,
+    # .NET types that are not expanded in properties / keys
+    [string[]] $SkipTypesDefault = ('System.Int*', 'System.UInt*', 'System.Double', 'System.Decimal', 'System.String', 'System.DateTime', 'System.TimeSpan', 'System.RuntimeType'),
+    [string[]] $SkipTypesAdditional
+)
+
+if(!$Path){
+    $parts = [scriptblock]::Create($MyInvocation.Line).ast.findall({$true},$true)
+
+    for($i = 0; $i -lt $parts.count; $i++){
+        if($parts[$i].ParameterName -eq 'Object'){
+            $Path = $parts[$i + 1].Extent.Text
+
+            if($path -notmatch '^(\$|\()'){
+                $Path = "($Path)"
+            }
+            break
+        }
+    }
+
+    if(!$Path){
+        $Path = '$Object'
+    }
+}
+
+    
+if($null -eq $Object -or $Object -is [System.DBNull]){
+    return
+}
+elseif($_currentDepth -gt $MaxDepth -or ($PSBoundParameters.ContainsKey('_currentDepth') -and ($SkipTypesDefault + $SkipTypesAdditional | &{process{if($Object.GetType().fullname -like $_){$_}}}))){
+    [pscustomobject] @{
+            PropertyPath = $Path
+            Type = $(if($null -ne $Object){$Object.GetType().fullname})
+            Value = $Object
+        }
+    return
+}
+
+if(!$Condensed){
+    [pscustomobject]@{
+        PropertyPath = $Path
+        Type = $(if($null -ne $Object){$Object.GetType().fullname})
+        Value = $Object
+    }
+}
+
+if($Object -is [hashtable] -or $Object -is [System.Collections.Specialized.OrderedDictionary]){
+    $keys = $Object.Keys
+}
+else{
+    $keys = $Object.psobject.properties.name
+}
+    
+foreach($key in $keys){
+    $displayKey = $key
+    if($key -match '\W'){
+        $displayKey = "'$key'"
+    }
+
+    if($Object.$key -is [System.Collections.IList]){
+        if(!$Condensed){
+            [pscustomobject]@{
+                PropertyPath = "$Path.$displayKey"
+                Type = $(if($null -ne $Object.$key){$Object.$key.GetType().fullname})
+                Value = $Object.$key
+            }
+        }
+
+        if($_currentDepth -lt $MaxDepth){
+            for($i = 0; $i -lt $Object.$key.count; $i++){
+                Expand-Property -Object $Object.$key[$i] -Path ($Path + "." + $displayKey + "[$i]") -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 2) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
+            }
+        }
+    }
+    elseif($null -eq $Object.$key -or $Object.$key -is [System.DBNull]){
+        [pscustomobject]@{
+            PropertyPath = "$Path.$displayKey"
+            Type = $(if($null -ne $Object.$key){$Object.$key.GetType().fullname})
+            Value = $Object.$key
+        }
+    }
+    else{
+        Expand-Property -Object $Object.$key -Path ($Path + "." + $displayKey) -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
+    }
+}
+}
+
 #endregion
 
 Export-ModuleMember -Variable scriptinvocation -Function '*' 
