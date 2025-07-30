@@ -3,103 +3,32 @@
 <Configuration>
     <ViewDefinitions>
         <View>
-            <Name>SADAccountUser</Name>
+            <Name>PropertyExpand</Name>
             <ViewSelectedBy>
-                <TypeName>SAD.ADAccount.user</TypeName>
+                <TypeName>ScriptTools.Property.Expand</TypeName>
             </ViewSelectedBy>
             <TableControl>
                 <TableHeaders>
                     <TableColumnHeader>
-                        <Width>30</Width>
+                        <Width>80</Width>
                     </TableColumnHeader>
                     <TableColumnHeader>
-                        <Width>14</Width>
+                        <Width>60</Width>
                     </TableColumnHeader>
                     <TableColumnHeader>
-                        <Width>33</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Width>31</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Label>AccountName</Label>
-                        <Width>18</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Width>19</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Label>Country</Label>
-                        <Width>10</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Width>20</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Width>22</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Width>20</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Width>30</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Width>25</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Label>Manager</Label>
-                        <Width>25</Width>
-                    </TableColumnHeader>
-                    <TableColumnHeader>
-                        <Width>25</Width>
                     </TableColumnHeader>
                 </TableHeaders>
                 <TableRowEntries>
                     <TableRowEntry>
-                    <Wrap/>
                         <TableColumnItems>
                             <TableColumnItem>
-                                <PropertyName>Displayname</PropertyName>
+                                <PropertyName>PropertyPath</PropertyName>
                             </TableColumnItem>
                             <TableColumnItem>
-                                <PropertyName>EmployeeNumber</PropertyName>
+                                <PropertyName>Type</PropertyName>
                             </TableColumnItem>
                             <TableColumnItem>
-                                <PropertyName>Department</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>Title</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>user</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>l</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>co</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>Company</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>whenCreated</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>extensionattribute10</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>mail</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>extensionattribute7</PropertyName>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <ScriptBlock>$_.manager -replace '^CN=([^,]+),OU=.*', '$1'</ScriptBlock>
-                            </TableColumnItem>
-                            <TableColumnItem>
-                                <PropertyName>useraccountcontrol</PropertyName>
+                                <PropertyName>Value</PropertyName>
                             </TableColumnItem>
                         </TableColumnItems>
                     </TableRowEntry>
