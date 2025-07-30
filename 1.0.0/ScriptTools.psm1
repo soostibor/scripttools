@@ -1,6 +1,6 @@
 ﻿<#
     Author: Tibor Soós (soos.tibor@hotmail.com)
-    Version: 1.3.0 [2025.07.29]
+    Version: 1.3.1 [2025.07.30]
 #>
 
 #region Logging
@@ -1263,7 +1263,7 @@ process{
         return
     }
     
-    if($Object -isnot [hashtable] -and $Object -isnot [System.Management.Automation.PSCustomObject]){
+    if($Object -isnot [System.Collections.IDictionary]){
         return $Object
     } 
 
@@ -1272,7 +1272,7 @@ process{
     }
 
     if(!$PSBoundParameters.to){
-        if($Object -is [hashtable]){
+        if($Object -is [System.Collections.IDictionary]){
             $To = 'pscustomobject'
         }
         elseif($Object -is [System.Management.Automation.PSCustomObject]){
@@ -1554,7 +1554,7 @@ process{
                 $Pattern = [regex]::Replace($origpattern, "<([^>]+)>", {[regex]::Escape($o.($args[0].value -replace "<|>"))})
             }
 
-            if($o -is [System.Collections.Hashtable] -or $o -is [System.Collections.Specialized.OrderedDictionary]){
+            if($o -is [System.Collections.IDictionary]){
                 $properties = $o.getenumerator() | Select-Object -Property Name, Value
             }
             else{
@@ -1769,7 +1769,7 @@ param(
         }
     }
     else{
-        if($ReferenceObject -is [hashtable] -or $ReferenceObject -is [System.Collections.Specialized.OrderedDictionary]){
+        if($ReferenceObject -is [System.Collections.IDictionary]){
             $ReferenceObject = [pscustomobject] $ReferenceObject
             $DifferenceObject = [pscustomobject] $DifferenceObject
         }
@@ -1934,7 +1934,7 @@ process{
                         break
                     }                    
                 }
-                elseif($null -ne $currentObj -and ((($currentObj -is [hashtable] -or $currentObj -is [System.Collections.Specialized.OrderedDictionary]) -and $currentObj.containskey($p)) -or ($currentObj.psobject.properties.count -and $currentObj.psobject.properties.name -contains $p))){
+                elseif($null -ne $currentObj -and (($currentObj -is [System.Collections.IDictionary] -and $currentObj.containskey($p)) -or ($currentObj.psobject.properties.count -and $currentObj.psobject.properties.name -contains $p))){
                     $currentObj = $currentObj.$p
                     if($null -eq $currentObj){
                         $exists = $false
@@ -1996,8 +1996,8 @@ param(
     [switch] $Force
 )
 
-    if($Primary -is [hashtable]){
-        if($Secondary -is [hashtable]){
+    if($Primary -is [System.Collections.IDictionary]){
+        if($Secondary -is [System.Collections.IDictionary]){
             foreach($key in $Secondary.keys){
                 if($Force -or !$Primary.containskey($key)){
                     $Primary.$key = $Secondary.$key
@@ -2013,7 +2013,7 @@ param(
         }
     }
     else{
-        if($Secondary -is [hashtable]){
+        if($Secondary -is [System.Collections.IDictionary]){
             foreach($key in $Secondary.keys){
                 if($Force -or $Primary.psobject.properties.name -notcontains $key){
                     Add-Member -InputObject $Primary -MemberType NoteProperty -Name $key -Value $Secondary.$key -Force
@@ -2065,7 +2065,8 @@ param(
     # Only leaf properties / keys are returned
     [switch] $Condensed,
     # .NET types that are not expanded in properties / keys
-    [string[]] $SkipTypesDefault = ('System.Int*', 'System.UInt*', 'System.Double', 'System.Decimal', 'System.String', 'System.DateTime', 'System.TimeSpan', 'System.RuntimeType'),
+    [string[]] $SkipTypesDefault = ('System.Int*', 'System.UInt*', 'System.Double', 'System.Decimal', 'System.String', 'System.DateTime', 'System.TimeSpan', 'System.RuntimeType',
+        'System.Management.Automation.ScriptBlock', 'System.Management.Automation.PSModuleInfo', 'System.Version'),
     [string[]] $SkipTypesAdditional
 )
 
@@ -2093,23 +2094,26 @@ if($null -eq $Object -or $Object -is [System.DBNull]){
     return
 }
 elseif($_currentDepth -gt $MaxDepth -or ($PSBoundParameters.ContainsKey('_currentDepth') -and ($SkipTypesDefault + $SkipTypesAdditional | &{process{if($Object.GetType().fullname -like $_){$_}}}))){
-    [pscustomobject] @{
+    $r = [pscustomobject] @{
             PropertyPath = $Path
             Type = $(if($null -ne $Object){$Object.GetType().fullname})
             Value = $Object
         }
-    return
+    $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+    return $r
 }
 
 if(!$Condensed){
     [pscustomobject]@{
-        PropertyPath = $Path
+        $r = PropertyPath = $Path
         Type = $(if($null -ne $Object){$Object.GetType().fullname})
         Value = $Object
     }
+    $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+    $r
 }
 
-if($Object -is [hashtable] -or $Object -is [System.Collections.Specialized.OrderedDictionary]){
+if($Object -is [System.Collections.IDictionary]){
     $keys = $Object.Keys
 }
 else{
@@ -2124,11 +2128,13 @@ foreach($key in $keys){
 
     if($Object.$key -is [System.Collections.IList]){
         if(!$Condensed){
-            [pscustomobject]@{
+            $r = [pscustomobject]@{
                 PropertyPath = "$Path.$displayKey"
                 Type = $(if($null -ne $Object.$key){$Object.$key.GetType().fullname})
                 Value = $Object.$key
             }
+            $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+            $r
         }
 
         if($_currentDepth -lt $MaxDepth){
@@ -2138,11 +2144,13 @@ foreach($key in $keys){
         }
     }
     elseif($null -eq $Object.$key -or $Object.$key -is [System.DBNull]){
-        [pscustomobject]@{
+        $r = [pscustomobject]@{
             PropertyPath = "$Path.$displayKey"
             Type = $(if($null -ne $Object.$key){$Object.$key.GetType().fullname})
             Value = $Object.$key
         }
+        $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+        $r
     }
     else{
         Expand-Property -Object $Object.$key -Path ($Path + "." + $displayKey) -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
