@@ -2104,8 +2104,8 @@ elseif($_currentDepth -gt $MaxDepth -or ($PSBoundParameters.ContainsKey('_curren
 }
 
 if(!$Condensed){
-    [pscustomobject]@{
-        $r = PropertyPath = $Path
+    $r = [pscustomobject]@{         
+        PropertyPath = $Path
         Type = $(if($null -ne $Object){$Object.GetType().fullname})
         Value = $Object
     }
