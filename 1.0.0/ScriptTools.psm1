@@ -1,6 +1,6 @@
 ﻿<#
     Author: Tibor Soós (soos.tibor@hotmail.com)
-    Version: 1.3.1 [2025.07.30]
+    Version: 1.3.2 [2025.08.11]
 #>
 
 #region Logging
@@ -1006,10 +1006,14 @@ param(
 )
 
     if($Name){
-        $open = "$Name ="
+        $open = "$Name = "
     }
     else{
         $open = ""
+    }
+
+    if($null -eq $Object){
+        return (" " * $IndentLevel * 4 + $open + '$null')
     }
 
     switch ($Object.gettype().fullname){
@@ -1107,6 +1111,15 @@ param(
 
                                  $out += " " * $IndentLevel * 4 + "}}"
                                  $out -join "`r`n"
+                            }
+
+        "System.Boolean" {
+                                if($Object -eq $true){
+                                    " " * $IndentLevel * 4 + $open + '$true'
+                                }
+                                else{
+                                    " " * $IndentLevel * 4 + $open + '$false'
+                                }
                             }
 
         default {
