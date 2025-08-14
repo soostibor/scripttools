@@ -1,6 +1,6 @@
 ﻿<#
     Author: Tibor Soós (soos.tibor@hotmail.com)
-    Version: 1.3.2 [2025.08.11]
+    Version: 1.3.3 [2025.08.14]
 #>
 
 #region Logging
@@ -871,9 +871,11 @@ function Get-LogIsAdministrator {
 
 #region Config management
 function Import-Config {
+[cmdletbinding()]
 param(
     [string[]]$PathsOrNames,
-    [Parameter(Mandatory = $true)][hashtable] $PSConfig
+    [Parameter(Mandatory = $false)][hashtable] $PSConfig,
+    [switch] $PassThru
 )
     function ResolveDynamicData {
     param([hashtable] $Confighive, $parentkeys = @())
@@ -945,6 +947,10 @@ param(
     
     if($null -eq $PSConfig){
         $PSConfig = @{}
+
+        if(!$Global:PSConfig){
+            $Global:PSConfig = $PSConfig
+        }
     }
 
     $scriptinvocation = (Get-PSCallStack)[1].InvocationInfo
@@ -996,35 +1002,69 @@ param(
             }
         }
     }
+
+    if($PassThru){
+        $PSConfig
+    }
 }
 
 function ConvertTo-Config {
+[cmdletbinding()]
 param(
     [Parameter(ValueFromPipeline = $true)] $Object,
     [Parameter(DontShow = $true)] [string] $Name,
+    [switch] $Compress,
     [Parameter(DontShow = $true)] [int] $IndentLevel = 0
 )
 
     if($Name){
-        $open = "$Name = "
+        if($Compress){
+            $open = "$Name="
+        }
+        else{
+            $open = "$Name = "
+        }
     }
     else{
         $open = ""
     }
 
     if($null -eq $Object){
-        return (" " * $IndentLevel * 4 + $open + '$null')
+        $fullType = "NULL"
+    }
+    else{
+        $fullType = $Object.gettype().fullname
+
+        if($fullType -eq 'System.Collections.Specialized.OrderedDictionary' -and $IndentLevel -eq 0){
+            $fullType = 'System.Collections.Hashtable'            
+        }
     }
 
-    switch ($Object.gettype().fullname){
+    switch ($fullType){
+        "NULL" {
+                    if($Compress){
+                        $open + '$null'
+                    }
+                    else{            
+                        " " * $IndentLevel * 4 + $open + '$null'
+                    }
+                    break
+                }
+
         "System.Object[]"    {
                                 $open += "@("
-                                $joinchar = ", "
+
+                                if($Compress){
+                                    $joinchar = ","
+                                }
+                                else{
+                                    $joinchar = ", "
+                                }
 
                                 $multiline = $false
                                 $strelements = @()
                                 foreach($elem in $Object){
-                                    $strelem = ConvertTo-Config -Object $elem                                
+                                    $strelem = ConvertTo-Config -Object $elem -Compress:$Compress
 
                                     if($elem -is [System.Object[]]){
                                         $strelem = "," + $strelem
@@ -1036,7 +1076,7 @@ param(
                                     }
                                 }
 
-                                if($multiline){
+                                if(!$Compress -and $multiline){
                                     $joinchar += "`r`n"
                                     $strelements = @($open) +
                                                     (($strelements | &{process{
@@ -1049,83 +1089,185 @@ param(
                                                     ($parts | &{process{" " * $IndentLevel * 4}}) -join "`r`n"
                                                 }}
                                 }
-                                else{
-                                    " " * $IndentLevel * 4 + $open + ($strelements -join $joinchar) + ")"
+                                else{                                
+                                    if($Compress){
+                                        $open + ($strelements -join $joinchar) + ")"
+                                    }
+                                    else{
+                                        " " * $IndentLevel * 4 + $open + ($strelements -join $joinchar) + ")"
+                                    }
                                 }
+                                break
                             }
 
         "System.Collections.Hashtable" {
                                  $open += "@{"
 
-                                 $out = @(" " * $IndentLevel * 4 + $open)
-
-                                 foreach($key in $Object.keys){
-                                    $out += ConvertTo-Config -Object $Object.$key -IndentLevel ($IndentLevel + 1) -Name $key
+                                 if($Compress){
+                                    $out = @($open)
+                                 }
+                                 else{
+                                    $out = @(" " * $IndentLevel * 4 + $open)
                                  }
 
-                                 $out += " " * $IndentLevel * 4 + "}"
-                                 $out -join "`r`n"
+                                 foreach($key in $Object.keys){
+                                    $out += ConvertTo-Config -Object $Object.$key -IndentLevel ($IndentLevel + 1) -Name $key -Compress:$Compress
+                                 }
+
+                                 if($Compress){
+                                    "$($out[0])" + ($out[1..($out.count -1)] -join ";") + "}"
+                                 }
+                                 else{
+                                     $out += " " * $IndentLevel * 4 + "}"
+                                     $out -join "`r`n"
+                                 }
+                                 break
                             }
 
         "System.Collections.Specialized.OrderedDictionary" {
-                                 $open += "{[ordered] @{"
-
-                                 $out = @(" " * $IndentLevel * 4 + $open)
-
-                                 foreach($key in $Object.keys){
-                                    $out += ConvertTo-Config -Object $Object.$key -IndentLevel ($IndentLevel + 1) -Name $key
+                                 if($Compress){
+                                    $open += "{[ordered]@{"
+                                    $out = @($open)
+                                 }
+                                 else{
+                                    $open += "{[ordered] @{"
+                                    $out = @(" " * $IndentLevel * 4 + $open)
                                  }
 
-                                 $out += " " * $IndentLevel * 4 + "}}"
-                                 $out -join "`r`n"
+                                 foreach($key in $Object.keys){
+                                    $out += ConvertTo-Config -Object $Object.$key -IndentLevel ($IndentLevel + 1) -Name $key -Compress:$Compress
+                                 }
+
+                                 if($Compress){
+                                    "$($out[0])" + ($out[1..($out.count -1)] -join ";") + "}}"
+                                 }
+                                 else{
+                                     $out += " " * $IndentLevel * 4 + "}}"
+                                     $out -join "`r`n"
+                                 }
+                                 break
                             }
 
         "System.String" {
-                                " " * $IndentLevel * 4 + $open + """$Object"""
+                                if($Compress){
+                                    $open + """$Object"""
+                                }
+                                else{
+                                    " " * $IndentLevel * 4 + $open + """$Object"""
+                                }
+                                break
                             }
 
         "System.Management.Automation.ScriptBlock" {
-                                " " * $IndentLevel * 4 + $open + "{$Object}"
+                                if($Compress){
+                                    $open + "{$Object}"
+                                }
+                                else{
+                                    " " * $IndentLevel * 4 + $open + "{$Object}"
+                                }
+                                break
                             }
 
         "System.DateTime" {
-                                " " * $IndentLevel * 4 + $open + "{[DateTime] ""$Object""}"
+                                if($Compress){
+                                    $open + "{[DateTime]""$Object""}"
+                                }
+                                else{
+                                    " " * $IndentLevel * 4 + $open + "{[DateTime] ""$Object""}"
+                                }
+                                break
+                            }
+
+        "System.TimeSpan" {
+                                if($Compress){
+                                    $open + "{[TimeSpan]""$Object""}"
+                                }
+                                else{
+                                    " " * $IndentLevel * 4 + $open + "{[TimeSpan] ""$Object""}"
+                                }
+                                break
                             }
 
         "System.Int32" {
-                                " " * $IndentLevel * 4 + $open + "$Object"
+                                if($Compress){
+                                    $open + "$Object"
+                                }
+                                else{
+                                    " " * $IndentLevel * 4 + $open + "$Object"
+                                }
+                                break
                             }
 
         "System.Double" {
-                                " " * $IndentLevel * 4 + $open + "$Object"
+                                if($Compress){
+                                    $open + "$Object"
+                                }
+                                else{
+                                    " " * $IndentLevel * 4 + $open + "$Object"
+                                }
+                                break
                             }
 
         "System.Management.Automation.PSCustomObject" {
-                                 $open += "{[PSCustomObject] @{"
 
-                                 $out = @(" " * $IndentLevel * 4 + $open)
-
-                                 foreach($prop in $Object.psobject.properties.name){
-                                    $out += ConvertTo-Config -Object $Object.$prop -IndentLevel ($IndentLevel + 1) -Name $prop
+                                 if($Compress){
+                                    $open += "{[PSCustomObject]@{"
+                                    $out = @($open)
+                                 }
+                                 else{
+                                    $open += "{[PSCustomObject] @{"
+                                    $out = @(" " * $IndentLevel * 4 + $open)
                                  }
 
-                                 $out += " " * $IndentLevel * 4 + "}}"
-                                 $out -join "`r`n"
+                                 foreach($prop in $Object.psobject.properties.name){
+                                    $out += ConvertTo-Config -Object $Object.$prop -IndentLevel ($IndentLevel + 1) -Name $prop -Compress:$Compress
+                                 }
+
+                                 if($Compress){
+                                    "$($out[0])" + ($out[1..($out.count -1)] -join ";") + "}}"
+                                 }
+                                 else{
+                                     $out += " " * $IndentLevel * 4 + "}}"
+                                     $out -join "`r`n"
+                                 }
+                                 break
                             }
 
         "System.Boolean" {
                                 if($Object -eq $true){
-                                    " " * $IndentLevel * 4 + $open + '$true'
+                                    if($Compress){
+                                        $open + '$true'
+                                    }
+                                    else{
+                                        " " * $IndentLevel * 4 + $open + '$true'
+                                    }
                                 }
                                 else{
-                                    " " * $IndentLevel * 4 + $open + '$false'
+                                    if($Compress){
+                                        $open + '$false'
+                                    }
+                                    else{
+                                        " " * $IndentLevel * 4 + $open + '$false'
+                                    }
                                 }
+                                break
                             }
 
         default {
             throw {"Couldn't convert datatype at '$Name' : '$($Object.gettype().fullname)' - $Object"}
         }
     }
+}
+
+function Export-Config {
+[cmdletbinding()]
+param(
+    [Parameter(ValueFromPipeline = $false)] $Object,
+    [Parameter(ValueFromPipeline = $false)] $Path
+)    
+
+    $configString = ConvertTo-Config -Object $Object
+    Set-Content -Value $configString -Path $Path -Encoding Default
 }
 #endregion
 
