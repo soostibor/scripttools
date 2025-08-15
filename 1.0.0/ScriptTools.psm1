@@ -870,39 +870,73 @@ function Get-LogIsAdministrator {
 #endregion
 
 #region Config management
-function Import-Config {
-[cmdletbinding()]
+function ResolveDynamicData {
 param(
-    [string[]]$PathsOrNames,
-    [Parameter(Mandatory = $false)][hashtable] $PSConfig,
-    [switch] $PassThru
+    $Confighive,
+    [switch] $dontexpand
 )
-    function ResolveDynamicData {
-    param([hashtable] $Confighive, $parentkeys = @())
-       
-        foreach($key in ($Confighive.Clone().Keys | Sort-Object -Property {
-                    if($_ -match '^Condition$'){"zz$($_)"}
-                    elseif($_ -match 'ConfigAction'){"zzz$($_)"}
-                    elseif($_ -match '^Conditional_'){"zzzz$($_)"}
-                    else{"__$($_)"}
+    if($Confighive -is [scriptblock]){
+        $Confighive = @{__PSConfigScriptBlockArray = $Confighive}
+    }
+    elseif($Confighive -isnot [hashtable]){
+        return [pscustomobject]@{
+                    UpdatedElement = $Confighive
+                    SkipAll = $dontexpand
                 }
-            )
-        ){
-            if($Confighive.$key -is [hashtable]){
-                ResolveDynamicData -confighive $Confighive.$key -parentkeys ($parentkeys + $key)
+    }
+       
+    foreach($key in ($Confighive.Clone().Keys | Sort-Object -Property {
+                if($_ -match '^Condition$'){"zz$($_)"}
+                elseif($_ -match 'ConfigAction'){"zzz$($_)"}
+                elseif($_ -match '^Conditional_'){"zzzz$($_)"}
+                else{"__$($_)"}
             }
-            elseif($Confighive.$key -is [System.Object[]]){
-                for($i = 0; $i -lt $Confighive.$key.count; $i++){
-                    if($Confighive.$key[$i] -is [scriptblock] -and $key -notlike 'sb_*'){
-                        $Confighive.$key[$i] = &(& $elem)
+        )
+    ){
+        if($Confighive.$key -is [hashtable]){
+            ResolveDynamicData -confighive $Confighive.$key -dontexpand:$dontexpand
+        }
+        elseif($Confighive.$key -is [System.Object[]] -and $key -notlike "sb_*"){
+            for($i = 0; $i -lt $Confighive.$key.count; $i++){
+                $result = ResolveDynamicData -Confighive $Confighive.$key[$i] -dontexpand:$dontexpand
+                $Confighive.$key[$i] = $result.UpdatedElement
+                if($result.SkipAll){
+                    $dontexpand = $true
+                    break
+                }
+            }
+        }
+        elseif($Confighive.$key -is [scriptblock] -and (!$Confighive.ContainsKey('Condition') -or $Confighive.Condition)){
+            [ref] $errors = $null
+            $tokens = [System.Management.Automation.PSParser]::Tokenize($Confighive.$key, $errors)
+            $skip = $dontexpand
+
+            if(!$skip){
+                foreach($token in $tokens){
+                    if($token.type -eq 'GroupStart'){
+                        $Confighive.$key = & $Confighive.$key
+                        continue
+                    }
+
+                    if($token.Type -eq 'Comment' -and $token.Content -match "DontExpand"){
+                        if($token.Content -match "DontExpandAll"){
+                            $dontexpand = $true
+                        }
+
+                        $skip = $true
+                        break
+                    }
+                    elseif($token.Type -ne 'NewLine'){
+                        break
                     }
                 }
             }
-            elseif($Confighive.$key -is [scriptblock] -and $key -notlike 'sb_*' -and (!$Confighive.ContainsKey('Condition') -or $Confighive.Condition)){
+
+            if(!$skip -and $key -notlike 'sb_*' ){
                 $errorhappened = $false
                 $errorcount = $Error.Count
                 try{
-                    $Confighive.$key = &(& $Confighive.$key)
+                    $Confighive.$key = & $Confighive.$key
                 }
                 catch{
                     $errorhappened = $true
@@ -912,39 +946,54 @@ param(
                     throw "Configuration parsing error"
                 }
             }
+
+            if($key -eq '__PSConfigScriptBlockArray'){
+                [pscustomobject]@{
+                    UpdatedElement = $Confighive.$key
+                    SkipAll = $dontexpand
+                }
+            }
         }
     }
+}
 
-    function MergeHives {
-        param(
-            [hashtable] $hive,
-            [hashtable] $target = $PSConfig
-        )
+function MergeHives {
+    param(
+        [hashtable] $hive,
+        [hashtable] $target = $PSConfig
+    )
 
-        foreach($h in $hive.Clone().Getenumerator()){
-            if($h.key -match '^Condition|^ConfigAction$'){
-                continue
+    foreach($h in $hive.Clone().Getenumerator()){
+        if($h.key -match '^Condition|^ConfigAction$'){
+            continue
+        }
+        elseif($h.value -isnot [hashtable]){
+            $target.($h.key) = $h.value
+        }
+        elseif(!$target.ContainsKey($h.key)){
+            if($h.value.containskey('ConfigAction')){
+                $h.value.remove('ConfigAction')
             }
-            elseif($h.value -isnot [hashtable]){
-                $target.($h.key) = $h.value
-            }
-            elseif(!$target.ContainsKey($h.key)){
-                if($h.value.containskey('ConfigAction')){
-                    $h.value.remove('ConfigAction')
-                }
                 
-                $target.($h.key) = $h.value
+            $target.($h.key) = $h.value
+        }
+        else{
+            try{
+                MergeHives -hive $h.value -target $target.($h.key)
             }
-            else{
-                try{
-                    MergeHives -hive $h.value -target $target.($h.key)
-                }
-                catch{
-                }
+            catch{
             }
         }
     }
-    
+}
+
+function Import-Config {
+[cmdletbinding()]
+param(
+    [string[]]$PathsOrNames,
+    [Parameter(Mandatory = $false)][hashtable] $PSConfig,
+    [switch] $PassThru
+)    
     if($null -eq $PSConfig){
         $PSConfig = @{}
 
@@ -1268,6 +1317,17 @@ param(
 
     $configString = ConvertTo-Config -Object $Object
     Set-Content -Value $configString -Path $Path -Encoding Default
+}
+
+function ConvertFrom-Config {
+param(
+    [string] $ConfigString
+)
+    $exportFile = Join-Path $env:TEMP 'tempPSConfig.psd1'
+    Set-Content -Path $exportFile -Value $ConfigString
+    $tempPSConfig = @{}
+    Import-Config -PathsOrNames $exportFile -PassThru -PSConfig $tempPSConfig
+    Remove-Item -Path $exportFile
 }
 #endregion
 
