@@ -13,6 +13,10 @@
                         <Width>80</Width>
                     </TableColumnHeader>
                     <TableColumnHeader>
+                        <Width>5</Width>
+                        <Alignment>Right</Alignment>
+                    </TableColumnHeader>
+                    <TableColumnHeader>
                         <Width>60</Width>
                     </TableColumnHeader>
                     <TableColumnHeader>
@@ -23,6 +27,9 @@
                         <TableColumnItems>
                             <TableColumnItem>
                                 <PropertyName>PropertyPath</PropertyName>
+                            </TableColumnItem>
+                            <TableColumnItem>
+                                <PropertyName>Depth</PropertyName>
                             </TableColumnItem>
                             <TableColumnItem>
                                 <PropertyName>Type</PropertyName>

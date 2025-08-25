@@ -1,6 +1,6 @@
 ﻿<#
     Author: Tibor Soós (soos.tibor@hotmail.com)
-    Version: 1.3.3 [2025.08.14]
+    Version: 1.3.5 [2025.08.21]
 #>
 
 #region Logging
@@ -1407,41 +1407,260 @@ end{
 }
 
 function Search-Script {
+[cmdletbinding()]
 param(
     [string] $Pattern,
-    [string] $Path,
+    [string[]] $Path,
     [string[]] $Extension = ("ps1", "psm1"),
     [string[]] $Exclude = "wxyz",
     [string[]] $ExcludePath,
     [switch] $SortByDate,
-    [switch] $CaseSensitive
+    [switch] $CaseSensitive,
+    [switch] $IncludeAll,
+    [switch] $FirstLine,
+    [int] $MaxLines = [int]::MaxValue
 )
+dynamicParam{
+    $global:paramDef_ElementType | New-DynamicParameter
+}
+end{
+    if(!$Path -and $allPowerShellFiles){
+        $Path = $allPowerShellFiles
+    }
+
+    $elementType = $PSBoundParameters.ElementType
+
     if($Extension -ne "*"){
         $include = $Extension | ForEach-Object {$_ -replace "^(\*)?(\.)?","*." }
     }
+
     $Exclude = $Exclude | ForEach-Object {$_ -replace "^(\*)?(\.)?","*." }
     
-    $Sortparam = "Path", "LineNumber"
+    $selectedFiles = @()
+
+    if($Path[0] -is [string] -or $Path[0] -is [System.IO.DirectoryInfo]){
+        foreach($p in $Path){
+            $selectedFiles += Get-ChildItem -Path $p -Include $include -Exclude $Exclude -Recurse | &{process {
+                    $dir = $_.DirectoryName
+                    if(!($ExcludePath | &{process{if($dir -like $_){$_}}})){
+                        $_
+                    }  
+                }}
+        }
+    }
+    else{
+        $selectedFiles += $Path | &{process {
+                    $dir = $_.DirectoryName
+                    $file = $_.name
+                    if(($include | &{process{if($file -like $_){$_}}}) -and !($ExcludePath | &{process{if($dir -like $_){$_}}}) -and !($ExcludePath | &{process{if($dir -like $_){$_}}})){
+                        $_
+                    }  
+                }}
+    }
+
+    if($elementType -eq 'String'){
+        $selectstringsplatting = @{}
+        if($CaseSensitive){
+            $selectstringsplatting.CaseSensitive = $true
+        }
+
+        $Sortparam = "Path", "LineNumber"
+    }
+    elseif($elementType -ne 'Comment'){
+        $notpart = ""
+
+        if($CaseSensitive){
+            $Pattern = "(?-i)$Pattern"
+        }
+
+        if($IncludeAll -and $Global:astTypes.$elementType.NotPart){
+            $notpart = "-and (!`$args[0].parent -or `$args[0].parent.gettype().fullname -ne ""System.Management.Automation.Language.$($Global:astTypes.$elementType.NotPart)Ast"")"
+        }
+
+        if($Global:astTypes.$elementType.ContainsKey('TypeOverride')){
+            $querystr = "`$args[0].gettype().fullname -eq ""System.Management.Automation.Language.$($Global:astTypes.$elementType.TypeOverride)Ast"" $notpart -and 
+                            (Get-Property -Object `$args[0] -PropPath $($Global:astTypes.$elementType.PropName -join ', ')).Value -match '$Pattern'"
+        }
+        else{
+            $querystr = "`$args[0].gettype().fullname -eq ""System.Management.Automation.Language.$($elementType)Ast"" $notpart -and 
+                            (Get-Property -Object `$args[0] -PropPath $($Global:astTypes.$elementType.PropName -join ', ')).Value -match '$Pattern'"
+        }
+
+        if($Global:astTypes.$elementType.containskey('AdditionalCriteria')){
+            $querystr += " -and $($Global:astTypes.$elementType.AdditionalCriteria)"
+        }
+
+        if($Global:astTypes.$elementType.containskey('Or')){
+            $querystr = "($querystr) -or ($(& $Global:astTypes.$elementType.Or))"
+        }
+
+        $query = [scriptblock]::Create($querystr)
+
+        $Sortparam = "Path", {if($_.LineNumber -match "-"){"  "}else{$_.LineNumber}}
+    }
     
     if($SortByDate){
-        $Sortparam = @("LastWriteTime") + $Sortparam
+        $Sortparam = @(@{e = {$_.LastWriteTime}; ascending = $false}) + $Sortparam
     }
 
-    $selectstringsplatting = @{}
-    if($CaseSensitive){
-        $selectstringsplatting.CaseSensitive = $true
+    $keepForSort = @()
+
+    foreach($psf in $selectedFiles){
+        if($elementType -ne 'String'){
+            $tokens = [System.Management.Automation.Language.Token[]]::new(1)
+            $errors = [System.Management.Automation.Language.ParseError[]]::new(1)
+
+            $AST = [System.Management.Automation.Language.Parser]::ParseFile(
+                $psf.fullname,
+                [ref] $tokens,
+                [ref] $errors
+            )
+
+            if($elementType -eq 'Comment'){
+                $selectstringsplatting = @{}
+
+                if($CaseSensitive){
+                    $selectstringsplatting.CaseSensitive = $true
+                }
+
+                $Sortparam = "Path", "LineNumber"
+
+                $tokens | &{process{
+                    if($_.kind -eq 'Comment' -and (
+                            $res = $_.Extent.Text -split "\r?\n" | Select-String -Pattern $Pattern @selectstringsplatting -Encoding default
+                        )){
+                            foreach($r in $res){
+                                $return = [pscustomobject]@{
+                                        Path = $_.Extent.File
+                                        LastWriteTime = $psf.LastWriteTime
+                                        LineNumber = ($_.Extent.StartLineNumber + $r.LineNumber - 1)
+                                        Line = $r.line
+                                    }
+
+                                    if(!$SortByDate){
+                                        $return
+                                    }
+                                    else{
+                                        $keepForSort += $return
+                                    }
+                            }
+                        }
+                }}
+            }
+            else{
+                $toAdd = @($AST.FindAll($query, $true))
+                foreach($ta in $toAdd){
+                    $expression = if($ta.gettype().fullname -match 'VariableExpression'){
+                                        if($ta.parent.GetType().fullname -notmatch 'AssignmentStatement'){
+                                            ($ast.Extent.Text -split "\r?\n")[$ta.extent.StartLineNumber - 1].trim()
+                                        }
+                                        else{
+                                            $ta.Parent.Extent.Text
+                                        }
+                                    }
+                                    else{
+                                        $ta.extent.Text
+                                    }
+
+                    $expression = $expression -split '\r?\n'
+
+                    $currentMaxLines = $MaxLines
+
+                    for($i = 0; $i -lt $expression.count -and $currentMaxLines -gt 0; $i++){
+                        $currentMaxLines--
+
+                        $return = [pscustomobject]@{
+                                        Path = $ta.extent.File
+                                        LastWriteTime = $psf.LastWriteTime
+                                        LineNumber = if($i -eq 0){$ta.extent.StartLineNumber.toString().padleft(10,'-')}else{" +" + $i.ToString().PadLeft(8)}
+                                        Line = $expression[$i]
+                                    }
+
+                        if(!$SortByDate){
+                            $return
+                        }
+                        else{
+                            $keepForSort += $return
+                        }
+
+                        if($FirstLine){
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        else{
+            $return = $psf | Select-String -Pattern $Pattern @selectstringsplatting -Encoding default |
+                Select-Object -Property Path, @{n="LastWriteTime"; e = {(get-item -Path $_.Path).LastWriteTime}}, LineNumber, Line
+
+            if($SortByDate){
+                $keepForSort += $return
+            }
+            else{
+                $return
+            }
+        }
     }
 
-    Get-ChildItem -Path $Path -Include $include -Exclude $Exclude -Recurse | &{process{
-            $dir = $_.DirectoryName
-            if(!($ExcludePath | &{process{if($dir -like $_){$_}}})){
-                $_
-            }}
-        } |
-        Select-String -Pattern $Pattern @selectstringsplatting |
-            Select-Object -Property Path, @{n="LastWriteTime"; e = {(get-item -Path $_.Path).LastWriteTime}}, LineNumber, Line |
-                Sort-Object -Property $Sortparam
+    if($keepForSort){
+        $keepForSort | Sort-Object -Property $Sortparam
+    }
 }
+}
+
+$astTypes = @{
+    'AssignmentStatement' = @{
+                                PropName = 'Left.VariablePath.UserPath', 'Left.Target.VariablePath.UserPath', 'Left.Child.VariablePath.UserPath', 'Left.Expression.VariablePath.UserPath', 'Left.Child.Child.VariablePath.UserPath'
+                                File = 'Extent.File'
+                                Line = 'Extent.StartLineNumber'
+                                Or = {"`$args[0].GetType().fullname -eq 'System.Management.Automation.Language.ParameterAst' -and `$args[0].Name -match '$pattern' -and `$args[0].DefaultValue"}
+                            }
+
+    'Command' = @{
+                                PropName = 'CommandElements[0].Value'
+                                File = 'Extent.File'
+                                Line = 'Extent.StartLineNumber'
+                            }
+
+    'ScriptInvocation' = @{
+                                PropName = 'CommandElements[0].Value'
+                                AdditionalCriteria = '($args[0].InvocationOperator -eq "Dot" -or $args[0].InvocationOperator -eq "Ampersand")'
+                                File = 'Extent.File'
+                                Line = 'Extent.StartLineNumber'
+                                TypeOverride = 'Command'
+                            }
+
+    'FunctionDefinition' = @{
+                                PropName = 'Name'
+                                File = 'Extent.File'
+                                Line = 'Extent.StartLineNumber'
+                            }
+
+    'VariableExpression' = @{
+                                PropName = 'Extent.Text'
+                                File = 'Extent.File'
+                                Line = 'Extent.StartLineNumber'
+                                NotPart = "AssignmentStatement"
+                            }
+
+    'Parameter' = @{
+                                PropName = 'Name.VariablePath.UserPath'
+                                File = 'Extent.File'
+                                Line = 'Extent.StartLineNumber'
+                            }
+
+    'Comment'   = "Custom"
+
+    'String'    = "Custom"
+}
+
+$paramDef_ElementType = [pscustomobject]@{
+            Name = 'ElementType'
+            Type = [string]
+            ValidationSet = {[string[]] $astTypes.Keys}
+            DefaultValus = 'FunctionDefinition'
+        }
 
 function Convert-CustomObjectHash {
 <#
@@ -2272,7 +2491,7 @@ function Expand-Property {
 [cmdletbinding(PositionalBinding=$false)]
 param(
     # Input object or hashtable
-    $Object, 
+    [Parameter(ValueFromPipeline = $true)] $Object, 
     # Maximum depth of recursion, default is 1
     [int] $MaxDepth = 1,
     [Parameter(Dontshow = $true)]$Path, 
@@ -2281,94 +2500,105 @@ param(
     [switch] $Condensed,
     # .NET types that are not expanded in properties / keys
     [string[]] $SkipTypesDefault = ('System.Int*', 'System.UInt*', 'System.Double', 'System.Decimal', 'System.String', 'System.DateTime', 'System.TimeSpan', 'System.RuntimeType',
-        'System.Management.Automation.ScriptBlock', 'System.Management.Automation.PSModuleInfo', 'System.Version'),
+        'System.Management.Automation.ScriptBlock', 'System.Management.Automation.PSModuleInfo', 'System.Version', 'System.Object[]', 'System.Enum'),
     [string[]] $SkipTypesAdditional
 )
 
-if(!$Path){
-    $parts = [scriptblock]::Create($MyInvocation.Line).ast.findall({$true},$true)
-
-    for($i = 0; $i -lt $parts.count; $i++){
-        if($parts[$i].ParameterName -eq 'Object'){
-            $Path = $parts[$i + 1].Extent.Text
-
-            if($path -notmatch '^(\$|\()'){
-                $Path = "($Path)"
-            }
-            break
-        }
-    }
-
+begin{
+    $pipeline = $false
     if(!$Path){
-        $Path = '$Object'
-    }
-}
+        $parts = [scriptblock]::Create($MyInvocation.Line).ast.findall({$true},$true)
 
-    
-if($null -eq $Object -or $Object -is [System.DBNull]){
-    return
-}
-elseif($_currentDepth -gt $MaxDepth -or ($PSBoundParameters.ContainsKey('_currentDepth') -and ($SkipTypesDefault + $SkipTypesAdditional | &{process{if($Object.GetType().fullname -like $_){$_}}}))){
-    $r = [pscustomobject] @{
-            PropertyPath = $Path
-            Type = $(if($null -ne $Object){$Object.GetType().fullname})
-            Value = $Object
+        for($i = 0; $i -lt $parts.count; $i++){
+            if($parts[$i].ParameterName -eq 'Object'){
+                $Path = $parts[$i + 1].Extent.Text
+
+                if($path -notmatch '^(\$|\()'){
+                    $Path = "($Path)"
+                }
+                break
+            }
         }
-    $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
-    return $r
-}
 
-if(!$Condensed){
-    $r = [pscustomobject]@{         
-        PropertyPath = $Path
-        Type = $(if($null -ne $Object){$Object.GetType().fullname})
-        Value = $Object
+        if(!$Path -and $parts[2].gettype().fullname -match 'PipelineAst'){
+            $pipeline = $true            
+        }
+
+        $excludeType = $SkipTypesDefault + $SkipTypesAdditional | &{process{$_ -replace "\[", '[[' -replace "\]", ']]'}}
+
+        if(!$Path){
+            $Path = '$Object'
+        }
+
+        $objectCount = 0
     }
-    $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
-    $r
-}
 
-if($Object -is [System.Collections.IDictionary]){
-    $keys = $Object.Keys
+    $excludeType = $SkipTypesDefault + $SkipTypesAdditional | &{process{$_ -replace "\[", "[[" -replace "\]", "]]"}}
 }
-else{
-    $keys = $Object.psobject.properties.name
-}
+process{    
+    if($null -eq $Object -or $Object -is [System.DBNull]){
+        return
+    }
     
-foreach($key in $keys){
-    $displayKey = $key
-    if($key -match '\W'){
-        $displayKey = "'$key'"
+    $keys = $null
+
+    if($pipeline){
+        $displayPath = $Path + "[$objectCount]"
+        $objectCount++
+    }
+    else{
+        $displayPath = $Path
     }
 
-    if($Object.$key -is [System.Collections.IList]){
-        if(!$Condensed){
+    if(!($excludeType | &{process{if($Object.gettype().fullname -like $_ -or $Object.pstypenames -contains $_){$_}}})){
+        if($Object -is [System.Collections.IDictionary]){
+            $keys = $Object.Keys
+        }
+        else{
+            $keys = $Object.psobject.properties.name
+        }
+
+        if($Object.GetType().FullName -notmatch 'ordered'){
+            $keys = $keys | Sort-Object
+        }
+    }
+
+    if(!$Condensed -or !$keys -or $_currentDepth -gt $MaxDepth){
+        $r = [pscustomobject] @{
+                PropertyPath = $displayPath
+                Depth = $_currentDepth
+                Type = $(if($null -ne $Object){$Object.GetType().fullname})
+                Value = $Object
+            }
+        $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+        $r
+    }
+
+    foreach($key in $keys){
+        $displayKey = $key
+        if($key -match '\W'){
+            $displayKey = "'$key'"
+        }
+
+        if($null -eq $Object.$key -or $Object.$key -is [System.DBNull]){
             $r = [pscustomobject]@{
                 PropertyPath = "$Path.$displayKey"
+                Depth = $_currentDepth
                 Type = $(if($null -ne $Object.$key){$Object.$key.GetType().fullname})
                 Value = $Object.$key
             }
             $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
             $r
         }
+        else{
+            Expand-Property -Object $Object.$key -Path ($Path + "." + $displayKey) -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
+        }
+    }
 
-        if($_currentDepth -lt $MaxDepth){
-            for($i = 0; $i -lt $Object.$key.count; $i++){
-                Expand-Property -Object $Object.$key[$i] -Path ($Path + "." + $displayKey + "[$i]") -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 2) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
-            }
+    if($Object -is [System.Collections.IList] -and $_currentDepth -lt $MaxDepth){
+        for($i = 0; $i -lt $Object.count; $i++){
+            Expand-Property -Object $Object[$i] -Path ($Path + "[$i]") -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
         }
-    }
-    elseif($null -eq $Object.$key -or $Object.$key -is [System.DBNull]){
-        $r = [pscustomobject]@{
-            PropertyPath = "$Path.$displayKey"
-            Type = $(if($null -ne $Object.$key){$Object.$key.GetType().fullname})
-            Value = $Object.$key
-        }
-        $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
-        $r
-    }
-    else{
-        Expand-Property -Object $Object.$key -Path ($Path + "." + $displayKey) -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
     }
 }
 }
@@ -2377,4 +2607,4 @@ foreach($key in $keys){
 
 New-Alias -Name Compare-ObjectProperty -Value Compare-Property
 
-Export-ModuleMember -Variable scriptinvocation -Function '*' -Alias Compare-ObjectProperty
+Export-ModuleMember -Variable scriptinvocation, astTypes, paramDef_ElementType -Function '*' -Alias Compare-ObjectProperty
