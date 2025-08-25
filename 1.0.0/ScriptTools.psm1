@@ -2497,7 +2497,7 @@ param(
     [Parameter(Dontshow = $true)]$Path, 
     [Parameter(Dontshow = $true)]$_currentDepth = 1,
     # Only leaf properties / keys are returned
-    [switch] $Condensed,
+    [switch] $LeafOnly,
     # .NET types that are not expanded in properties / keys
     [string[]] $SkipTypesDefault = ('System.Int*', 'System.UInt*', 'System.Double', 'System.Decimal', 'System.String', 'System.DateTime', 'System.TimeSpan', 'System.RuntimeType',
         'System.Management.Automation.ScriptBlock', 'System.Management.Automation.PSModuleInfo', 'System.Version', 'System.Object[]', 'System.Enum'),
@@ -2505,7 +2505,6 @@ param(
 )
 
 begin{
-    $pipeline = $false
     if(!$Path){
         $parts = [scriptblock]::Create($MyInvocation.Line).ast.findall({$true},$true)
 
@@ -2513,7 +2512,7 @@ begin{
             if($parts[$i].ParameterName -eq 'Object'){
                 $Path = $parts[$i + 1].Extent.Text
 
-                if($path -notmatch '^(\$|\()'){
+                if($path -notmatch '^\$' -or ($parts[$i + 1].staticType -match "\[\]$" -and $Path -notmatch "^\(")){
                     $Path = "($Path)"
                 }
                 break
@@ -2527,7 +2526,12 @@ begin{
         $excludeType = $SkipTypesDefault + $SkipTypesAdditional | &{process{$_ -replace "\[", '[[' -replace "\]", ']]'}}
 
         if(!$Path){
-            $Path = '$Object'
+            if($pipeline){
+                $Path = '$Input'
+            }
+            else{            
+                $Path = '$Object'
+            }
         }
 
         $objectCount = 0
@@ -2536,12 +2540,6 @@ begin{
     $excludeType = $SkipTypesDefault + $SkipTypesAdditional | &{process{$_ -replace "\[", "[[" -replace "\]", "]]"}}
 }
 process{    
-    if($null -eq $Object -or $Object -is [System.DBNull]){
-        return
-    }
-    
-    $keys = $null
-
     if($pipeline){
         $displayPath = $Path + "[$objectCount]"
         $objectCount++
@@ -2549,6 +2547,32 @@ process{
     else{
         $displayPath = $Path
     }
+
+    if($null -eq $Object){
+        $r = [pscustomobject] @{
+                PropertyPath = $displayPath
+                Depth = $_currentDepth
+                Type = $null
+                Value = '$null'
+            }
+        $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+        $r
+        return
+    }
+
+    if($Object -is [System.DBNull]){
+        $r = [pscustomobject] @{
+                PropertyPath = $displayPath
+                Depth = $_currentDepth
+                Type = 'System.DBNull'
+                Value = 'NULL'
+            }
+        $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+        $r
+        return
+    }
+    
+    $keys = $null
 
     if(!($excludeType | &{process{if($Object.gettype().fullname -like $_ -or $Object.pstypenames -contains $_){$_}}})){
         if($Object -is [System.Collections.IDictionary]){
@@ -2563,7 +2587,7 @@ process{
         }
     }
 
-    if(!$Condensed -or !$keys -or $_currentDepth -gt $MaxDepth){
+    if(!$LeafOnly -or !$keys -or $_currentDepth -gt $MaxDepth){
         $r = [pscustomobject] @{
                 PropertyPath = $displayPath
                 Depth = $_currentDepth
@@ -2584,24 +2608,12 @@ process{
             $displayKey = "'$key'"
         }
 
-        if($null -eq $Object.$key -or $Object.$key -is [System.DBNull]){
-            $r = [pscustomobject]@{
-                PropertyPath = "$Path.$displayKey"
-                Depth = $_currentDepth
-                Type = $(if($null -ne $Object.$key){$Object.$key.GetType().fullname})
-                Value = $Object.$key
-            }
-            $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
-            $r
-        }
-        else{
-            Expand-Property -Object $Object.$key -Path ($Path + "." + $displayKey) -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
-        }
+        Expand-Property -Object $Object.$key -Path ($displayPath + "." + $displayKey) -MaxDepth $MaxDepth -LeafOnly:$LeafOnly -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
     }
 
     if($Object -is [System.Collections.IList] -and $_currentDepth -lt $MaxDepth){
         for($i = 0; $i -lt $Object.count; $i++){
-            Expand-Property -Object $Object[$i] -Path ($Path + "[$i]") -MaxDepth $MaxDepth -Condensed:$Condensed -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
+            Expand-Property -Object $Object[$i] -Path ($displayPath + "[$i]") -MaxDepth $MaxDepth -LeafOnly:$LeafOnly -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional
         }
     }
 }
