@@ -2572,6 +2572,10 @@ process{
             }
         $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
         $r
+
+        if($_currentDepth -gt $MaxDepth){
+            return
+        }
     }
 
     foreach($key in $keys){
