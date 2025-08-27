@@ -1072,6 +1072,10 @@ param(
 )
 
     if($Name){
+        if($Name -match "\W" -and $Name -notmatch "^('|"").*\1$"){
+            $Name = "'$Name'"
+        }
+
         if($Compress){
             $open = "$Name="
         }
@@ -1094,7 +1098,7 @@ param(
         }
     }
 
-    if($fullType -match "\[\]$"){
+    if($fullType -match "\[\]$" -or $Object -is [System.Collections.ArrayList]){
         if($fullType -match "^System\.Object"){
             $open += "@("
             $close = ")"
@@ -1133,10 +1137,10 @@ param(
                                 $parts = $_ -split "\r\n"
                                 ($parts | &{process{" " * 4 + $_}}) -join "`r`n"
                             }}) -join $joinchar) +
-                            ")"
+                            $close
             $strelements | &{process{
                             $parts = $_ -split "`r`n"
-                            ($parts | &{process{" " * $IndentLevel * 4}}) -join "`r`n"
+                            ($parts | &{process{" " * $IndentLevel * 4 + $_}}) -join "`r`n"
                         }}
         }
         else{                                
@@ -1220,10 +1224,20 @@ param(
 
             "System.Char" {
                                     if($Compress){
-                                        $open + "{[char] '$Object'}"
+                                        $open + "{[char]'$Object'}"
                                     }
                                     else{
                                         " " * $IndentLevel * 4 + $open + "{[char] '$Object'}"
+                                    }
+                                    break
+                                }
+
+            "System.Version" {
+                                    if($Compress){
+                                        $open + "{[version]'$Object'}"
+                                    }
+                                    else{
+                                        " " * $IndentLevel * 4 + $open + "{[version] '$Object'}"
                                     }
                                     break
                                 }
@@ -1413,7 +1427,7 @@ param(
 function Export-PSData {
 [cmdletbinding()]
 param(
-    [Parameter(ValueFromPipeline = $false)] $Object,
+    [Parameter(ValueFromPipeline = $true)] $Object,
     [Parameter(ValueFromPipeline = $false)] $Path
 )    
 
@@ -2674,6 +2688,9 @@ begin{
 
         $objectCount = 0
     }
+    else{
+        $pipeline = $false
+    }
 
     $excludeType = $SkipTypesDefault + $SkipTypesAdditional | &{process{$_ -replace "\[", "[[" -replace "\]", "]]"}}
 }
@@ -2760,5 +2777,6 @@ process{
 #endregion
 
 New-Alias -Name Compare-ObjectProperty -Value Compare-Property
+New-Alias -Name Expand-PSData -Value Expand-Property
 
 Export-ModuleMember -Variable scriptinvocation, astTypes, paramDef_ElementType -Function '*' -Alias Compare-ObjectProperty
