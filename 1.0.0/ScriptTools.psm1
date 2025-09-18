@@ -1,6 +1,6 @@
 ﻿<#
     Author: Tibor Soós (soos.tibor@hotmail.com)
-    Version: 1.4.0 [2025.08.27]
+    Version: 1.5.0 [2025.09.18]
 #>
 
 #region Logging
@@ -876,16 +876,18 @@ param(
     [switch] $dontexpand
 )
     if($PSDatahive -is [scriptblock]){
-        $PSDatahive = @{__PSPSDataScriptBlockArray = $PSDatahive}
+        $PSDatahive = @{__PSDataScriptBlockArray = $PSDatahive}
     }
-    elseif($PSDatahive -isnot [hashtable]){
+    elseif($PSDatahive -isnot [System.Collections.IDictionary]){
         return [pscustomobject]@{
                     UpdatedElement = $PSDatahive
                     SkipAll = $dontexpand
                 }
     }
+
+    $PSDataHiveKeys = $PSDatahive.Keys.ForEach({$_})
        
-    foreach($key in ($PSDatahive.Clone().Keys | Sort-Object -Property {
+    foreach($key in ($PSDataHiveKeys | Sort-Object -Property {
                 if($_ -match '^Condition$'){"zz$($_)"}
                 elseif($_ -match 'ConfigAction'){"zzz$($_)"}
                 elseif($_ -match '^Conditional_'){"zzzz$($_)"}
@@ -893,10 +895,10 @@ param(
             }
         )
     ){
-        if($PSDatahive.$key -is [hashtable]){
+        if($PSDatahive.$key -is [System.Collections.IDictionary]){
             ResolveDynamicData -PSDatahive $PSDatahive.$key -dontexpand:$dontexpand
         }
-        elseif($PSDatahive.$key -is [System.Object[]] -and $key -notlike "sb_*"){
+        elseif($PSDatahive.$key -is [System.Object[]]){
             for($i = 0; $i -lt $PSDatahive.$key.count; $i++){
                 $result = ResolveDynamicData -PSDatahive $PSDatahive.$key[$i] -dontexpand:$dontexpand
                 $PSDatahive.$key[$i] = $result.UpdatedElement
@@ -906,15 +908,14 @@ param(
                 }
             }
         }
-        elseif($PSDatahive.$key -is [scriptblock] -and (!$PSDatahive.ContainsKey('Condition') -or $PSDatahive.Condition)){
+        elseif($PSDatahive.$key -is [scriptblock] -and ($PSDatahive.Keys -notcontains 'Condition' -or $PSDatahive.Condition)){
             [ref] $errors = $null
             $tokens = [System.Management.Automation.PSParser]::Tokenize($PSDatahive.$key, $errors)
             $skip = $dontexpand
 
             if(!$skip){
                 foreach($token in $tokens){
-                    if($token.type -eq 'GroupStart'){
-                        $PSDatahive.$key = & $PSDatahive.$key
+                    if($token.type -eq 'GroupStart'){                        
                         continue
                     }
 
@@ -932,7 +933,7 @@ param(
                 }
             }
 
-            if(!$skip -and $key -notlike 'sb_*' ){
+            if(!$skip){
                 $errorhappened = $false
                 $errorcount = $Error.Count
                 try{
@@ -959,19 +960,19 @@ param(
 
 function MergeHives {
     param(
-        [hashtable] $hive,
-        [hashtable] $target = $PSData
+        [System.Collections.IDictionary] $hive,
+        [System.Collections.IDictionary] $target = $PSData
     )
 
-    foreach($h in $hive.Clone().Getenumerator()){
+    foreach($h in $hive.Getenumerator()){
         if($h.key -match '^Condition|^ConfigAction$'){
             continue
         }
-        elseif($h.value -isnot [hashtable]){
+        elseif($h.value -isnot [System.Collections.IDictionary]){
             $target.($h.key) = $h.value
         }
-        elseif(!$target.ContainsKey($h.key)){
-            if($h.value.containskey('ConfigAction')){
+        elseif($target.Keys -notcontains $h.key){
+            if($h.value.keys -contains 'ConfigAction'){
                 $h.value.remove('ConfigAction')
             }
                 
@@ -991,27 +992,29 @@ function Import-PSData {
 [cmdletbinding()]
 param(
     [string[]]$PathsOrNames,
-    [Parameter(Mandatory = $false)][hashtable] $PSData,
+    [Parameter(Mandatory = $false)][System.Collections.IDictionary] $PSData,
     [switch] $PassThru
 )    
+
+    $initiatePSConfig = $false
     if($null -eq $PSData){
         $PSData = @{}
 
-        if(!$Global:PSConfig){
-            $Global:PSConfig = $PSData
+        if(!(Get-Variable -Name PSConfig -Scope Global -ErrorAction Ignore)){
+            $initiatePSConfig = $true
         }
     }
 
     $scriptinvocation = (Get-PSCallStack)[1].InvocationInfo
 
     if($scriptinvocation.mycommand.path -match "\\\d+\.\d+\.\d+\\.*?psm1$"){
-        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\.psm1$" -replace "\\\d+\.\d+\.\d+\\(?!.*?\\)","\Config\").psd1"
+        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\.psm1$" -replace "\\\d+\.\d+\.\d+\\(?!.*?\\)","\Config\").data.ps1"
     }
     elseif($scriptinvocation.mycommand.path -match "\\.*?psm1$"){
-        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\.psm1$" -replace "\\(?!.*?\\)","\Config\").psd1"
+        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\.psm1$" -replace "\\(?!.*?\\)","\Config\").data.ps1"
     }
     else{
-        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\\(?!.*?\\)","\Config\").psd1"
+        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\\(?!.*?\\)","\Config\").data.ps1"
     }
 
     if(!$PathsOrNames -and !(test-path -path $defaultconfig)){
@@ -1026,17 +1029,42 @@ param(
     }
 
     foreach($Path in $PathsOrNames){
+        if($Path -notlike "*.data.ps1"){
+            throw "Name of the PS data file must end with '.data.ps1'"
+        }
+
         if($Path -notmatch "^\w:|^\."){
             $Path = Join-Path (split-path $scriptinvocation.mycommand.path) "\Config\$Path"
         }
 
         if(!(Test-Path -Path $Path)){
-            Write-Error "No config file was found at '$Path'"
+            Write-Error "No PS data file was found at '$Path'"
             continue
         }
 
+        $tokens = [System.Management.Automation.Language.Token[]]::new(1)
+        $errors = [System.Management.Automation.Language.ParseError[]]::new(1)
+
+        $AST = [System.Management.Automation.Language.Parser]::ParseFile(
+                    $Path,
+                    [ref] $tokens,
+                    [ref] $errors
+                )
+        
+        if($errors){
+            throw "There are errors in PS data file '$Path'"
+        }
+
+        $topLevelLayer = $AST.Find({$true}, $false)
+
+        $topLevelExtentText = Get-Property -Object $topLevelLayer -PropPath "[0].EndBlock.Extent.Text" -ValueOnly
+
+        if(!$topLevelExtentText -or $topLevelExtentText.trim() -notmatch "^(\[ordered\]\s*)?@\{"){
+            throw "PS data file '$Path' must contain a single hash literal"
+        }
+
         try{
-            $Config = Import-PowerShellDataFile -Path $Path -ErrorAction Stop
+            $Config = & $Path
         }
         catch{
             throw $_
@@ -1044,17 +1072,22 @@ param(
 
         ResolveDynamicData -PSDatahive $Config
 
-        $ConfigClone = $Config.Clone()
+        $ConfigKeys = @($Config.Keys.foreach({$_}))
 
-        foreach($key in ($ConfigClone.keys -notmatch '^Condition' | Sort-Object)){
+        foreach($key in ($ConfigKeys -notmatch '^Condition' | Sort-Object)){
             MergeHives -hive $Config
         }
 
-        foreach($key in ($ConfigClone.keys -match '^Conditional_' | Sort-Object)){
-            if($ConfigClone.$key.condition){
+        foreach($key in ($ConfigKeys -match '^Conditional_' | Sort-Object)){
+            if($Config.$key.condition){
                 MergeHives -hive $Config.$key
+                $Config.Remove($key)
             }
         }
+    }
+
+    if($initiatePSConfig){
+        $global:PSConfig = $PSData
     }
 
     if($PassThru){
@@ -1092,10 +1125,6 @@ param(
     }
     else{
         $fullType = $Object.gettype().fullname
-
-        if($fullType -eq 'System.Collections.Specialized.OrderedDictionary' -and $IndentLevel -eq 0){
-            $fullType = 'System.Collections.Hashtable'            
-        }
     }
 
     if($fullType -match "\[\]$" -or $Object -is [System.Collections.ArrayList]){
@@ -1104,8 +1133,8 @@ param(
             $close = ")"
         }
         else{
-            $open += "{,([$($fullType)] @("
-            $close = "))}"
+            $open += "[$($fullType)] @("
+            $close = ")"
         }
 
         if($Compress){
@@ -1190,11 +1219,11 @@ param(
 
             "System.Collections.Specialized.OrderedDictionary" {
                                      if($Compress){
-                                        $open += "{[ordered]@{"
+                                        $open += "[ordered]@{"
                                         $out = @($open)
                                      }
                                      else{
-                                        $open += "{[ordered] @{"
+                                        $open += "[ordered] @{"
                                         $out = @(" " * $IndentLevel * 4 + $open)
                                      }
 
@@ -1203,10 +1232,10 @@ param(
                                      }
 
                                      if($Compress){
-                                        "$($out[0])" + ($out[1..($out.count -1)] -join ";") + "}}"
+                                        "$($out[0])" + ($out[1..($out.count -1)] -join ";") + "}"
                                      }
                                      else{
-                                         $out += " " * $IndentLevel * 4 + "}}"
+                                         $out += " " * $IndentLevel * 4 + "}"
                                          $out -join "`r`n"
                                      }
                                      break
@@ -1224,70 +1253,70 @@ param(
 
             "System.Char" {
                                     if($Compress){
-                                        $open + "{[char]'$Object'}"
+                                        $open + "[char]'$Object'"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "{[char] '$Object'}"
+                                        " " * $IndentLevel * 4 + $open + "[char] '$Object'"
                                     }
                                     break
                                 }
 
             "System.Version" {
                                     if($Compress){
-                                        $open + "{[version]'$Object'}"
+                                        $open + "[version]'$Object'"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "{[version] '$Object'}"
+                                        " " * $IndentLevel * 4 + $open + "[version] '$Object'"
                                     }
                                     break
                                 }
 
             "System.Management.Automation.ScriptBlock" {
                                     if($Compress){
-                                        $open + "{$Object}"
+                                        $open + "{{$Object}}"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "{$Object}"
+                                        " " * $IndentLevel * 4 + $open + "{{$Object}}"
                                     }
                                     break
                                 }
 
             "System.DateTime" {
                                     if($Compress){
-                                        $open + "{[DateTime]""$(get-date -Date $Object -Format 'yyyy.MM.dd HH:mm:ss')""}"
+                                        $open + "[DateTime]""$(get-date -Date $Object -Format 'yyyy.MM.dd HH:mm:ss')"""
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "{[DateTime] ""$(get-date -Date $Object -Format 'yyyy.MM.dd HH:mm:ss')""}"
+                                        " " * $IndentLevel * 4 + $open + "[DateTime] ""$(get-date -Date $Object -Format 'yyyy.MM.dd HH:mm:ss')"""
                                     }
                                     break
                                 }
 
             "System.TimeSpan" {
                                     if($Compress){
-                                        $open + "{[TimeSpan]""$Object""}"
+                                        $open + "[TimeSpan]""$Object"""
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "{[TimeSpan] ""$Object""}"
+                                        " " * $IndentLevel * 4 + $open + "[TimeSpan] ""$Object"""
                                     }
                                     break
                                 }
 
             "System.Byte" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[byte]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[byte] $Object"
                                     }
                                     break
                                 }
 
             "System.Int16" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[System.Int16]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[System.Int16] $Object"
                                     }
                                     break
                                 }
@@ -1304,70 +1333,70 @@ param(
 
             "System.Int64" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[System.Int64]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[System.Int64] $Object"
                                     }
                                     break
                                 }
 
             "System.UInt16" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[System.UInt16]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[System.UInt16] $Object"
                                     }
                                     break
                                 }
 
             "System.UInt32" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[System.UInt32]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[System.UInt32] $Object"
                                     }
                                     break
                                 }
 
             "System.UInt64" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[System.UInt64]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[System.UInt64] $Object"
                                     }
                                     break
                                 }
 
             "System.Decimal" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[System.Decimal]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[System.Decimal] $Object"
                                     }
                                     break
                                 }
 
             "System.Double" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[System.Double]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[System.Double] $Object"
                                     }
                                     break
                                 }
 
             "System.Single" {
                                     if($Compress){
-                                        $open + "$Object"
+                                        $open + "[System.Single]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "$Object"
+                                        " " * $IndentLevel * 4 + $open + "[System.Single] $Object"
                                     }
                                     break
                                 }
@@ -1375,11 +1404,11 @@ param(
             "System.Management.Automation.PSCustomObject" {
 
                                      if($Compress){
-                                        $open += "{[PSCustomObject]@{"
+                                        $open += "[PSCustomObject]@{"
                                         $out = @($open)
                                      }
                                      else{
-                                        $open += "{[PSCustomObject] @{"
+                                        $open += "[PSCustomObject] @{"
                                         $out = @(" " * $IndentLevel * 4 + $open)
                                      }
 
@@ -1388,10 +1417,10 @@ param(
                                      }
 
                                      if($Compress){
-                                        "$($out[0])" + ($out[1..($out.count -1)] -join ";") + "}}"
+                                        "$($out[0])" + ($out[1..($out.count -1)] -join ";") + "}"
                                      }
                                      else{
-                                         $out += " " * $IndentLevel * 4 + "}}"
+                                         $out += " " * $IndentLevel * 4 + "}"
                                          $out -join "`r`n"
                                      }
                                      break
@@ -1418,7 +1447,13 @@ param(
                                 }
 
             default {
-                throw "Couldn't convert datatype at '$Name' : '$($Object.gettype().fullname)' - $Object"
+                $nameInMessage = $Name
+
+                if(!$Name){
+                    $nameInMessage = Get-Variable -Name Name -ValueOnly -Scope 1 -ErrorAction Ignore
+                }
+
+                throw "Couldn't convert datatype at '$nameInMessage' : '$($Object.gettype().fullname)' - $Object"
             }
         }
     }
@@ -1437,14 +1472,21 @@ param(
 
 function ConvertFrom-PSData {
 param(
-    [string] $PSDataString
+    [Parameter(ValueFromPipeLine = $true)] [string] $PSDataString
 )
-    if($PSDataString.Trim() -notmatch "^@{"){
+begin{
+    $allStrings = @()
+}
+process{
+    $allStrings += $PSDataString
+}
+end{
+    if(!$allStrings -or $allStrings.Trim() -notmatch "^(\[ordered\]\s*)?@\{"){
         $embed = $true
         $PSDataString = "@{PSDataEmbedding = $($PSDataString)}"
     }
 
-    $exportFile = Join-Path $env:TEMP 'tempPSData.psd1'
+    $exportFile = Join-Path $env:TEMP 'tempPS.data.ps1'
     Set-Content -Path $exportFile -Value $PSDataString
     $tempPSData = @{}
     Import-PSData -PathsOrNames $exportFile -PSData $tempPSData
@@ -1455,6 +1497,7 @@ param(
     }
 
     return $tempPSData
+}
 }
 #endregion
 
