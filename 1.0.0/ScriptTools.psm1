@@ -192,6 +192,7 @@ param(
 }
 
 function GetLogName {
+    $LogName = $null
     if($global:logging -and $global:logging -is [hashtable] -and $global:logging.Keys.Count -eq 1){
         $LogName = $global:logging.Keys | Select-Object -First 1 
     }
