@@ -1057,7 +1057,7 @@ param(
 
         $topLevelLayer = $AST.Find({$true}, $false)
 
-        $topLevelExtentText = Get-Property -Object $topLevelLayer -PropPath "[0].EndBlock.Extent.Text" -ValueOnly
+        $topLevelExtentText = Get-Property -Object $topLevelLayer -PropertyPath "[0].EndBlock.Extent.Text" -ValueOnly
 
         if(!$topLevelExtentText -or $topLevelExtentText.trim() -notmatch "^(\[ordered\]\s*)?@\{"){
             throw "PS data file '$Path' must contain a single hash literal"
@@ -1243,10 +1243,10 @@ param(
 
             "System.String" {
                                     if($Compress){
-                                        $open + """$Object"""
+                                        $open + "'$Object'"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + """$Object"""
+                                        " " * $IndentLevel * 4 + $open + "'$Object'"
                                     }
                                     break
                                 }
@@ -1273,30 +1273,30 @@ param(
 
             "System.Management.Automation.ScriptBlock" {
                                     if($Compress){
-                                        $open + "{{$Object}}"
+                                        $open + "{$Object}"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "{{$Object}}"
+                                        " " * $IndentLevel * 4 + $open + "{$Object}"
                                     }
                                     break
                                 }
 
             "System.DateTime" {
                                     if($Compress){
-                                        $open + "[DateTime]""$(get-date -Date $Object -Format 'yyyy.MM.dd HH:mm:ss')"""
+                                        $open + "[DateTime]'$(get-date -Date $Object -Format 'yyyy.MM.dd HH:mm:ss')'"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "[DateTime] ""$(get-date -Date $Object -Format 'yyyy.MM.dd HH:mm:ss')"""
+                                        " " * $IndentLevel * 4 + $open + "[DateTime] '$(get-date -Date $Object -Format 'yyyy.MM.dd HH:mm:ss')'"
                                     }
                                     break
                                 }
 
             "System.TimeSpan" {
                                     if($Compress){
-                                        $open + "[TimeSpan]""$Object"""
+                                        $open + "[TimeSpan]'$Object'"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "[TimeSpan] ""$Object"""
+                                        " " * $IndentLevel * 4 + $open + "[TimeSpan] '$Object'"
                                     }
                                     break
                                 }
@@ -1971,100 +1971,256 @@ param(
     # Input object, either a hashtable or a PSObject
     [psobject] $Object,
     # Name of the property or key to update
-    [string]   $PropName,
+    [string]   $PropertyPath,
+    # Do not expand dots (.) in -PropertyPath
+    [switch] $LiteralPropertyName,
     # The new value to include in the update process. By default it's 1.
     [psobject] $Value = 1,
     # Switch to output the update input object
     [switch]   $PassThru,
     # Switch to do an overwrite
-    [switch]   $Force
+    [switch]   $Force,
+    [Parameter(Dontshow = $true)] $objectToReturn = $Object
 )
+    if(!$LiteralPropertyName -and $PropertyPath -match '\.|\[\w+\](?=(\.|$))'){
+        $nextProp, $PropertyPath = $PropertyPath -split '\.|(?=\[\w+\]$)', 2
+
+        if($nextProp){            
+            $nextObj = $Object.$nextProp
+            Update-Property -Object $nextObj -PropertyPath $PropertyPath -Value $Value -PassThru:$PassThru -Force:$Force -objectToReturn $objectToReturn
+            return
+        }
+    }
+
+    $indx = $null
+
+    if($PropertyPath -match '^\[(\w+)\]$'){
+        if($Matches[1] -as [int]){
+            $indx = [int] $Matches[1]
+
+            if($Object -is [collections.ilist]){
+                $PropertyPath = $null
+                if($Object.count -le $indx){
+                    if($ErrorActionPreference -ne 'Ignore'){
+                        Write-Error "Index property is out of range"        
+                    }
+                    return
+                }
+            }
+            else{
+                $PropertyPath = $indx
+                $indx = $null
+            }
+        }
+        else{
+            $PropertyPath = $Matches[1]
+        }
+    }
+
+    $PropertyPath = $PropertyPath -replace '^[''"]|[''"]$'
+
     if($null -eq $Object){
         if($ErrorActionPreference -ne 'Ignore'){
-            Write-Error "No object - update propery"        
+            Write-Error "No object"        
         }
         return
     }
 
-    if($Object -is [hashtable] -and !$Object.containskey($PropName)){
-        $Object.$PropName = $Value
+    if($Object -is [hashtable] -and !$Object.containskey($PropertyPath)){
+        $Object.$PropertyPath = $Value
     }
-    elseif($Object -isnot [hashtable] -and $Object.psobject.Properties.Name -notcontains $PropName){
-        Add-Member -InputObject $Object -MemberType NoteProperty -Name $PropName -Value $Value
+    elseif($Object -isnot [hashtable] -and $Object -isnot [system.collections.ilist] -and $Object.psobject.Properties.Name -notcontains $PropertyPath){
+        Add-Member -InputObject $Object -MemberType NoteProperty -Name $PropertyPath -Value $Value
     }
     elseif($Force){
-        $Object.$PropName = $Value
-    }
-    elseif($Object.$PropName -is [int] -and $Value -is [int]){
-        $Object.$PropName += $Value
-    }
-    elseif($Object.$PropName -is [string]){
-        if($Value -ne $Object.$PropName){
-            $Object.$PropName = @($Object.$PropName) + $Value
-        }
-    }
-    elseif($Object.$PropName -is [collections.ilist]){
-        if($Object.$PropName -is [collections.ilist] -and $Object.$PropName.count -gt 0 -and $Object.$PropName[0] -is [hashtable]){
-            if($Value -is [collections.ilist] -and $Value.count -gt 0 -and $Value[0] -is [hashtable]){
-                $existingKeys = $Object.$PropName | &{process{ {$_.Keys}}}
-
-                if($existingKeys -notcontains ($Value.keys | Select-Object -First 1)){
-                    $Object.$PropName += $Value
-                }
-                else{                    
-                    $equalfound = $false
-                    foreach($v in $Object.$PropName){
-                        $difffound = $false
-                        foreach($k in $v.keys){
-                            if($v.$k -ne $Value[0].$k){
-                                $difffound = $true
-                                break
-                            }
-                        }
-                        if(!$difffound){
-                            $equalfound = $true
-                            break
-                        }
-                    }
-                    
-                    if(!$equalfound){
-                        $Object.$PropName += $Value
-                    }
-                }
-            }
+        if($null -eq $indx){
+            $Object.$PropertyPath = $Value
         }
         else{
-            foreach($v in $Value){
-                if($Object.$PropName -notcontains $v){
-                    $Object.$PropName += $v
-                }
-            }
-        }
-    }
-    elseif($Object.$PropName -is [System.Collections.Hashtable] -and $Value -is [System.Collections.Hashtable]){
-        $keys = [object[]] $Value.keys
-        foreach($key in $keys){
-            if($Object.$PropName.containskey($key)){
-                if($Object.$PropName.$key -notcontains $Value.$key){
-                    if($null -ne $Object.$PropName.$key){
-                        $Object.$PropName.$key = @($Object.$PropName.$key) + $Value.$key
-                    }
-                    else{
-                        $Object.$PropName.$key = $Value.$key
-                    }
-                }
-            }
-            else{
-                $Object.$PropName.$key = $Value.$key
-            }
+            $Object[$indx] = $Value
         }
     }
     else{
-        $Object.$PropName = @($Object.$PropName) + $Value
+        if($null -eq $indx){
+            if($Object.$PropertyPath -is [int] -and $Value -is [int]){
+                $Object.$PropertyPath += $Value
+            }
+            elseif($Object.$PropertyPath -is [string]){
+                if($Value -ne $Object.$PropertyPath){
+                    $Object.$PropertyPath = @($Object.$PropertyPath) + $Value
+                }
+            }
+            elseif($Object.$PropertyPath -is [collections.ilist]){
+                if($Object.$PropertyPath.count -gt 0 -and $Object.$PropertyPath[0] -is [hashtable]){
+                    if($Value -is [collections.ilist] -and $Value.count -gt 0 -and $Value[0] -is [hashtable]){
+                        $existingKeys = $Object.$PropertyPath | &{process{$_.Keys}}
+
+                        if($existingKeys -notcontains ($Value | &{process{$_.Keys}})){
+                            $Object.$PropertyPath += $Value
+                        }
+                        else{              
+                            foreach($v in $Value){      
+                                $equalfound = $null
+
+                                for($i = 0; $i -lt $Object.$PropertyPath.count; $i++){
+                                    $difffound = $false
+                                    foreach($k in $o.keys){
+                                        if($v.$k -ne $v.$k){
+                                            $difffound = $true
+                                            break
+                                        }
+                                    }
+                                    if(!$difffound){
+                                        $equalfound = $i
+                                        break
+                                    }
+                                }
+                    
+                                if($null -ne $equalfound){
+                                    $Object.$PropertyPath += $v
+                                }
+                                else{
+                                    $Object.$PropertyPath[$equalfound] = $v
+                                }
+                            }
+                        }
+                    }
+                }
+                else{
+                    $toadd = @()
+                    foreach($elem in $Value){
+                        if($Object.$PropertyPath -notcontains $elem){
+                            $toadd += $elem
+                        }
+                    }
+
+                    if($toadd){
+                        if($Object.$PropertyPath -is [System.Collections.ArrayList]){
+                            $Object.$PropertyPath.addrange($toadd)
+                        }
+                        else{
+                            $Object.$PropertyPath += $toadd
+                        }
+                    }
+                }
+            }
+            elseif($Object.$PropertyPath -is [System.Collections.Hashtable] -and $Value -is [System.Collections.Hashtable]){
+                $keys = [object[]] $Value.keys
+                foreach($key in $keys){
+                    if($Object.$PropertyPath.containskey($key)){
+                        if($Object.$PropertyPath.$key -notcontains $Value.$key){
+                            if($null -ne $Object.$PropertyPath.$key){
+                                $Object.$PropertyPath.$key = @($Object.$PropertyPath.$key) + $Value.$key
+                            }
+                            else{
+                                $Object.$PropertyPath.$key = $Value.$key
+                            }
+                        }
+                    }
+                    else{
+                        $Object.$PropertyPath.$key = $Value.$key
+                    }
+                }
+            }
+            elseif($null -eq $Object.$PropertyPath){
+                $Object.$PropertyPath = $Value
+            }
+            else{
+                $Object.$PropertyPath = @($Object.$PropertyPath) + $Value
+            }
+        }
+        else{
+            if($Object[$indx] -is [int] -and $Value -is [int]){
+                $Object[$indx] += $Value
+            }
+            elseif($Object[$indx] -is [string]){
+                if($Value -ne $Object[$indx]){
+                    $Object[$indx] = @($Object[$indx]) + $Value
+                }
+            }
+            elseif($Object[$indx] -is [collections.ilist]){
+                if($Object[$indx].count -gt 0 -and $Object[$indx][0] -is [hashtable]){
+                    if($Value -is [collections.ilist] -and $Value.count -gt 0 -and $Value[0] -is [hashtable]){
+                        $existingKeys = $Object[$indx] | &{process{$_.Keys}}
+
+                        if($existingKeys -notcontains ($Value.keys | &{process{$_.Keys}})){
+                            $Object[$indx] += $Value
+                        }
+                        else{                    
+                            foreach($v in $Value){      
+                                $equalfound = $null
+
+                                for($i = 0; $i -lt $Object[$indx].count; $i++){
+                                    $difffound = $false
+                                    foreach($k in $o.keys){
+                                        if($v.$k -ne $v.$k){
+                                            $difffound = $true
+                                            break
+                                        }
+                                    }
+                                    if(!$difffound){
+                                        $equalfound = $i
+                                        break
+                                    }
+                                }
+                    
+                                if($null -ne $equalfound){
+                                    $Object[$indx] += $v
+                                }
+                                else{
+                                    $Object[$indx][$equalfound] = $v
+                                }
+                            }
+                        }
+                    }
+                }
+                else{
+                    $toadd = @()
+                    foreach($elem in $Value){
+                        if($Object.$PropertyPath -notcontains $elem){
+                            $toadd += $elem
+                        }
+                    }
+
+                    if($toadd){
+                        if($Object.$PropertyPath -is [System.Collections.ArrayList]){
+                            $Object.$PropertyPath.addrange($toadd)
+                        }
+                        else{
+                            $Object.$PropertyPath += $toadd
+                        }
+                    }
+                }
+            }
+            elseif($Object[$indx] -is [System.Collections.Hashtable] -and $Value -is [System.Collections.Hashtable]){
+                $keys = [object[]] $Value.keys
+                foreach($key in $keys){
+                    if($Object[$indx].containskey($key)){
+                        if($Object[$indx].$key -notcontains $Value.$key){
+                            if($null -ne $Object[$indx].$key){
+                                $Object[$indx].$key = @($Object[$indx].$key) + $Value.$key
+                            }
+                            else{
+                                $Object[$indx].$key = $Value.$key
+                            }
+                        }
+                    }
+                    else{
+                        $Object[$indx].$key = $Value.$key
+                    }
+                }
+            }
+            elseif($null -eq $Object[$indx]){
+                $Object.$PropertyPath = $Value
+            }
+            else{
+                $Object[$indx] = @($Object[$indx]) + $Value
+            }
+        }
     }
 
     if($PassThru){
-        $Object
+        $objectToReturn
     }
 }
 
