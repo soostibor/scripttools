@@ -1006,16 +1006,23 @@ param(
         }
     }
 
-    $scriptinvocation = (Get-PSCallStack)[1].InvocationInfo
+    $scriptinvocation = (Get-PSCallStack)[-2].InvocationInfo
 
-    if($scriptinvocation.mycommand.path -match "\\\d+\.\d+\.\d+\\.*?psm1$"){
-        $defaultconfig = $scriptinvocation.mycommand.path -replace "\\\d+\.\d+\.\d+\\(?!.*?\\)", "\Config\" -replace "\.psm1$", ".data.ps1"
+    if($scriptinvocation.mycommand.path){
+        $basepath = $scriptinvocation.mycommand.path
+    }
+    elseif($scriptinvocation.MyCommand.Module -and $scriptinvocation.MyCommand.Module.Path){
+        $basepath = $scriptinvocation.MyCommand.Module.Path
+    }
+
+    if($basepath -match "\\\d+\.\d+\.\d+\\.*?ps(m)?1$"){
+        $defaultconfig = $scriptinvocation.mycommand.path -replace "\\\d+\.\d+\.\d+\\(?!.*?\\)", "\Config\" -replace "\.ps(m)?1$", ".data.ps1"
     }
     else{
-        $defaultconfig = $scriptinvocation.mycommand.path -replace "\\(?!.*?\\)", "\Config\" -replace "\.ps(m)?1$", ".data.ps1"
+        $defaultconfig = $basepath -replace "\\(?!.*?\\)", "\Config\" -replace "\.ps(m)?1$", ".data.ps1"
     }
 
-    if(!$PathsOrNames -and !(test-path -path $defaultconfig)){
+    if(!$PathsOrNames -and (!$defaultconfig -or !(test-path -path $defaultconfig))){
         if(get-module -Name "PSConfigs" -ErrorAction Ignore -ListAvailable){
             Import-Module -Name PSConfigs -Force
             $defaultconfig = Get-PSConfigs -ScriptName $scriptinvocation.MyCommand.Name
@@ -1926,6 +1933,22 @@ process{
         $Object
     }
 }
+}
+
+Function Update-Config {
+param(
+    [Parameter(Mandatory = $true)][string] $Environment,
+    [Parameter(Mandatory = $true)]$prefix
+)
+
+    if($PSBoundParameters.ContainsKey("Environment") -or !$global:psconfig.ContainsKey("$($prefix)Environment")){
+        $global:psconfig."$($prefix)Environment" = $Environment
+    }
+
+    if((Get-Variable -Name psconfig -Scope Global -ErrorAction Ignore) -and $global:psconfig -is [System.Collections.IDictionary] -and $global:psconfig.ContainsKey("$($prefix)Config")){
+        $global:psconfig.Remove("$($prefix)Config")
+    }
+    Import-PSData -PSData $global:psconfig
 }
 #endregion
 
