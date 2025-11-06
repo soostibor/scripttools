@@ -889,7 +889,7 @@ param(
        
     foreach($key in ($PSDataHiveKeys | Sort-Object -Property {
                 if($_ -match '^Condition$'){"zz$($_)"}
-                elseif($_ -match 'ConfigAction'){"zzz$($_)"}
+                elseif($_ -match '^ConfigAction'){"zzz$($_)"}
                 elseif($_ -match '^Conditional_'){"zzzz$($_)"}
                 else{"__$($_)"}
             }
@@ -965,15 +965,16 @@ function MergeHives {
     )
 
     foreach($h in $hive.Getenumerator()){
-        if($h.key -match '^Condition|^ConfigAction$'){
+        if($h.key -match '^Condition|^ConfigAction'){
             continue
         }
         elseif($h.value -isnot [System.Collections.IDictionary]){
             $target.($h.key) = $h.value
         }
         elseif($target.Keys -notcontains $h.key){
-            if($h.value.keys -contains 'ConfigAction'){
-                $h.value.remove('ConfigAction')
+            $configActions = @($h.value.keys) -match '^ConfigAction'
+            foreach($ca in $configActions){
+                $h.value.remove($ca)
             }
                 
             $target.($h.key) = $h.value
@@ -1008,13 +1009,10 @@ param(
     $scriptinvocation = (Get-PSCallStack)[1].InvocationInfo
 
     if($scriptinvocation.mycommand.path -match "\\\d+\.\d+\.\d+\\.*?psm1$"){
-        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\.psm1$" -replace "\\\d+\.\d+\.\d+\\(?!.*?\\)","\Config\").data.ps1"
-    }
-    elseif($scriptinvocation.mycommand.path -match "\\.*?psm1$"){
-        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\.psm1$" -replace "\\(?!.*?\\)","\Config\").data.ps1"
+        $defaultconfig = $scriptinvocation.mycommand.path -replace "\\\d+\.\d+\.\d+\\(?!.*?\\)", "\Config\" -replace "\.psm1$", ".data.ps1"
     }
     else{
-        $defaultconfig = "$($scriptinvocation.mycommand.path -replace "\\(?!.*?\\)","\Config\").data.ps1"
+        $defaultconfig = $scriptinvocation.mycommand.path -replace "\\(?!.*?\\)", "\Config\" -replace "\.ps(m)?1$", ".data.ps1"
     }
 
     if(!$PathsOrNames -and !(test-path -path $defaultconfig)){
@@ -1024,7 +1022,7 @@ param(
         }
     }
 
-    if($PathsOrNames -notcontains $defaultconfig -and (Test-Path $defaultconfig)){
+    if($defaultconfig -and $PathsOrNames -notcontains $defaultconfig -and (Test-Path $defaultconfig)){
         $PathsOrNames = @($defaultconfig) + $PathsOrNames | Where-Object {$_}
     }
 
@@ -3029,7 +3027,7 @@ process{
                 Type = $null
                 Value = '$null'                
             }
-        $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+        $r.pstypenames.insert(0, 'ScriptTools.Property.Expand')
         $r
         return
     }
@@ -3042,7 +3040,7 @@ process{
                 Type = 'System.DBNull'
                 Value = 'NULL'
             }
-        $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+        $r.pstypenames.insert(0, 'ScriptTools.Property.Expand')
         $r
         return
     }
@@ -3070,7 +3068,7 @@ process{
                 Type = $(if($null -ne $Object){$Object.GetType().fullname})
                 Value = $Object
             }
-        $r.pstypenames.insert(1, 'ScriptTools.Property.Expand')
+        $r.pstypenames.insert(0, 'ScriptTools.Property.Expand')
         $r
 
         if($_currentDepth -gt $MaxDepth){
