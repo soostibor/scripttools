@@ -1671,11 +1671,11 @@ end{
 
         if($Global:astTypes.$elementType.ContainsKey('TypeOverride')){
             $querystr = "`$args[0].gettype().fullname -eq ""System.Management.Automation.Language.$($Global:astTypes.$elementType.TypeOverride)Ast"" $notpart -and 
-                            (Get-Property -Object `$args[0] -PropPath $($Global:astTypes.$elementType.PropName -join ', ')).Value -match '$Pattern'"
+                            (Get-Property -Object `$args[0] -PropertyPath $($Global:astTypes.$elementType.PropName -join ', ')).Value -match '$Pattern'"
         }
         else{
             $querystr = "`$args[0].gettype().fullname -eq ""System.Management.Automation.Language.$($elementType)Ast"" $notpart -and 
-                            (Get-Property -Object `$args[0] -PropPath $($Global:astTypes.$elementType.PropName -join ', ')).Value -match '$Pattern'"
+                            (Get-Property -Object `$args[0] -PropertyPath $($Global:astTypes.$elementType.PropName -join ', ')).Value -match '$Pattern'"
         }
 
         if($Global:astTypes.$elementType.containskey('AdditionalCriteria')){
@@ -2745,13 +2745,13 @@ function Get-Property {
 .DESCRIPTION
    This function gets the value of a property or key under a hierarchy of properties and keys and/or under the index of collections.
 .EXAMPLE
-    Get-ChildItem C:\Windows\system32\*.exe | Get-Property -PropPath "VersionInfo.CompanyName", "PSDrive.Provider.Name" -ObjectNameProperty Name
+    Get-ChildItem C:\Windows\system32\*.exe | Get-Property -PropertyPath "VersionInfo.CompanyName", "PSDrive.Provider.Name" -ObjectNameProperty Name
 
     Gets the VersionInfo.CompanyName and PSDrive.Provider.Name properties of all EXE files under c:\windows\system32 folder. The result will have the Name of each files under the Object column.
 .EXAMPLE
-   $h = @{Name = "MyHashTable"; Array = @{n = 'First'; data = 'Text1'}, @{n = 'Second'; data = 'Text2'}}; Get-Property -Object $h -PropPath 'Array[1].data' -ValueOnly
+   $h = @{Name = "MyHashTable"; Array = @{n = 'First'; data = 'Text1'}, @{n = 'Second'; data = 'Text2'}}; Get-Property -Object $h -PropertyPath 'Array[1].data' -ValueOnly
 
-   In this example we get the 'Text2' from hashtable $h. In this case the -PropPath contains an index as well and because we used the -ValueOnly switch only the value of 'data' is returned.
+   In this example we get the 'Text2' from hashtable $h. In this case the -PropertyPath contains an index as well and because we used the -ValueOnly switch only the value of 'data' is returned.
 .INPUTS
    hashtables or psobjects
 .OUTPUTS
