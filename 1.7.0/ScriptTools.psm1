@@ -900,11 +900,16 @@ param(
         }
         elseif($PSDatahive.$key -is [System.Object[]]){
             for($i = 0; $i -lt $PSDatahive.$key.count; $i++){
-                $result = ResolveDynamicData -PSDatahive $PSDatahive.$key[$i] -dontexpand:$dontexpand
-                $PSDatahive.$key[$i] = $result.UpdatedElement
-                if($result.SkipAll){
-                    $dontexpand = $true
-                    break
+                if($PSDatahive.$key[$i] -is [System.Collections.IDictionary]){
+                    ResolveDynamicData -PSDatahive $PSDatahive.$key[$i] -dontexpand:$dontexpand
+                }
+                else{
+                    $result = ResolveDynamicData -PSDatahive $PSDatahive.$key[$i] -dontexpand:$dontexpand
+                    $PSDatahive.$key[$i] = $result.UpdatedElement
+                    if($result.SkipAll){
+                        $dontexpand = $true
+                        break
+                    }
                 }
             }
         }
@@ -1038,7 +1043,7 @@ param(
             throw "Name of the PS data file must end with '.data.ps1'"
         }
 
-        if($Path -notmatch "^\w:|^\."){
+        if($Path -notmatch "^\w+:|^\."){
             $Path = Join-Path (split-path $scriptinvocation.mycommand.path) "\Config\$Path"
         }
 
@@ -1050,8 +1055,9 @@ param(
         $tokens = [System.Management.Automation.Language.Token[]]::new(1)
         $errors = [System.Management.Automation.Language.ParseError[]]::new(1)
 
+        $realPath = Resolve-Path -Path $Path | Select-Object -ExpandProperty ProviderPath
         $AST = [System.Management.Automation.Language.Parser]::ParseFile(
-                    $Path,
+                    $realPath,
                     [ref] $tokens,
                     [ref] $errors
                 )
@@ -1066,6 +1072,44 @@ param(
 
         if(!$topLevelExtentText -or $topLevelExtentText.trim() -notmatch "^(\[ordered\]\s*)?@\{"){
             throw "PS data file '$Path' must contain a single hash literal"
+        }
+
+        $allCommands = @($AST.FindAll({$args[0] -is [System.Management.Automation.Language.ScriptBlockExpressionAst] -or 
+                                        $args[0] -is [System.Management.Automation.Language.CommandAst] -or 
+                                        $args[0] -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -or 
+                                        $args[0] -is [System.Management.Automation.Language.CommandExpressionAst]},$true))
+
+        foreach($command in $allCommands){
+            Update-Property -Object $command.Parent -PropertyPath Children -Value $command
+        }
+
+        $errors = $false
+
+        for($i = 1; $i -lt $allCommands.count; $i++){
+            $command = $allCommands[$i]
+
+            $currentLevel = $command
+            $prevprevprev = $null
+            $prevprev = $null
+            $prev = $null
+            while($currentLevel -and $currentLevel -isnot [System.Management.Automation.Language.HashtableAst]){
+                $prevprevprev = $prevprev
+                $prevprev = $prev
+                $prev = $currentLevel
+                $currentLevel = $currentLevel.Parent
+            }
+
+            if($prevprevprev -isnot [System.Management.Automation.Language.ScriptBlockExpressionAst] -and 
+                !($command.Children -is [System.Management.Automation.Language.ScriptBlockExpressionAst] -or
+                $command.Expression -is [System.Management.Automation.Language.HashtableAst] -or
+                $command.Expression -is [System.Management.Automation.Language.ConstantExpressionAst] -or
+                $command.Expression -is [System.Management.Automation.Language.ConvertExpressionAst] -or
+                $command.Expression -is [System.Management.Automation.Language.ArrayLiteralAst] -or
+                $command.Expression -is [System.Management.Automation.Language.BinaryExpressionAst] -or
+                $command.Expression -is [System.Management.Automation.Language.VariableExpressionAst] -or
+                $command.Expression -is [System.Management.Automation.Language.ArrayExpressionAst])){
+                    throw "Commands are allowed only in scriptblocks: $($prev.extent)"
+            }
         }
 
         try{
@@ -2770,20 +2814,27 @@ param(
 )
 begin{
     if(!$ObjectNameProperty){
-        $parts = [scriptblock]::Create($MyInvocation.Line).ast.findall({$true},$true)
+        $parts = $null
+        try{
+            $mi = $MyInvocation
+            $parts = [scriptblock]::Create($mi.Line).ast.findall({$true},$true)
 
-        for($i = 0; $i -lt $parts.count; $i++){
-            if($parts[$i].ParameterName -eq 'Object'){
-                $ObjectName = $parts[$i + 1].Extent.Text
+            for($i = 0; $i -lt $parts.count; $i++){
+                if($parts[$i].ParameterName -eq 'Object'){
+                    $ObjectName = $parts[$i + 1].Extent.Text
 
-                if($ObjectName -notmatch '^\(.*\)$' -and ($ObjectName -notmatch '^\$' -or ($parts[$i + 1].staticType -match "\[\]$" -and $ObjectName -notmatch "^\("))){
-                    $ObjectName = "($ObjectName)"
+                    if($ObjectName -notmatch '^\(.*\)$' -and ($ObjectName -notmatch '^\$' -or ($parts[$i + 1].staticType -match "\[\]$" -and $ObjectName -notmatch "^\("))){
+                        $ObjectName = "($ObjectName)"
+                    }
+                    break
                 }
-                break
             }
         }
+        catch{
+            $global:Error.RemoveAt(0)
+        }
 
-        if(!$ObjectName -and $parts[2].gettype().fullname -match 'PipelineAst'){
+        if(!$ObjectName -and $parts -and $parts[2].gettype().fullname -match 'PipelineAst'){
             $pipeline = $true            
         }
 
