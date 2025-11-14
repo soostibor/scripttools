@@ -1011,8 +1011,8 @@ param(
         }
     }
 
-    $scriptinvocation = (Get-PSCallStack)[-2].InvocationInfo
-
+    $scriptinvocation = Get-PSCallStack | Where-Object {$_.Location -notlike 'ScriptTools.psm1*'} | Select-Object -First 1 -ExpandProperty InvocationInfo
+    
     if($scriptinvocation.mycommand.path){
         $basepath = $scriptinvocation.mycommand.path
     }
@@ -1052,10 +1052,17 @@ param(
             continue
         }
 
+        $realPath = Resolve-Path -Path $Path | Select-Object -ExpandProperty ProviderPath
+
+        $authenticode = Get-AuthenticodeSignature -FilePath $realPath -ErrorAction Ignore
+
+        if(!$authenticode -or $authenticode.Status -notin 'Valid', 'NotSigned'){
+            throw "Signature is not valid on data file '$realPath'"
+        }
+
         $tokens = [System.Management.Automation.Language.Token[]]::new(1)
         $errors = [System.Management.Automation.Language.ParseError[]]::new(1)
 
-        $realPath = Resolve-Path -Path $Path | Select-Object -ExpandProperty ProviderPath
         $AST = [System.Management.Automation.Language.Parser]::ParseFile(
                     $realPath,
                     [ref] $tokens,
@@ -1982,10 +1989,17 @@ process{
 Function Update-Config {
 param(
     [Parameter(Mandatory = $true)][string] $Environment,
-    [Parameter(Mandatory = $true)]$prefix
+    [Parameter(Mandatory = $true)]$prefix,
+    [switch] $Force
 )
+    $psb = $null
+    $cs = Get-PSCallStack
 
-    if($PSBoundParameters.ContainsKey("Environment") -or !$global:psconfig.ContainsKey("$($prefix)Environment")){
+    if($cs.count -ge 2 -and !$Force){
+         $Force = $cs[1].InvocationInfo.BoundParameters.ContainsKey("$($prefix)Environment") -and $cs[1].InvocationInfo.BoundParameters."$($prefix)Environment"
+    }
+
+    if($PSBoundParameters.ContainsKey("Environment") -and (!$global:psconfig.ContainsKey("$($prefix)Environment") -or $Force)){
         $global:psconfig."$($prefix)Environment" = $Environment
     }
 
