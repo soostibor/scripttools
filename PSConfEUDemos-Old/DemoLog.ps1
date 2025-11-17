@@ -8,19 +8,19 @@ param(
 )
 
 function SubFunction {
-    New-LogEntry "This is a highlighted entry from a function" -type Highlight
+    New-LogEntry "This is a highlighted entry from a function" -Type Highlight
 
     if($LogScenario -match 'Module'){
-        New-LogEntry "value of `$a : $a" -type Warning
+        New-LogEntry "value of `$a : $a" -Type Warning
     }
 
     if($LogScenario -match 'Verbose|Silent'){
-        New-LogEntry "Indented entry from a function" -indentlevel 1
-        New-LogEntry "This is an absolute 0 indent" -indentlevel 0 -useabsoluteindent
+        New-LogEntry "Indented entry from a function" -IndentLevel 1
+        New-LogEntry "This is an absolute 0 indent" -IndentLevel 0 -UseAbsoluteIndent
     }
 
     if($LogScenario -match 'TerminateFunction'){
-        New-LogEntry "Serious issue in a function" -type Terminate
+        New-LogEntry "Serious issue in a function" -Type Terminate
     }
 
     "This is some output"
@@ -53,22 +53,22 @@ cls
 # 
 ######################################################################################
 
-Import-Module ScriptTools -Force
+Import-Module .\ScriptTools.psd1 -Force
 
 if($LogScenario -match 'AlternateLog'){
-    $logname = Initialize-Logging -title "Logging Demo" -Verbose -BySeconds
+    $LogName = Initialize-Logging -Title "Logging Demo" -Verbose -BySeconds
 }
 elseif($LogScenario -match 'SimulateRunbook'){
-    $logname = Initialize-Logging -title "Logging Demo" -Verbose -simulateRunbook
+    $LogName = Initialize-Logging -Title "Logging Demo" -Verbose -simulateRunbook
 }
 elseif($LogScenario -match 'Silent'){
-    $logname = Initialize-Logging -title "Logging Demo"
+    $LogName = Initialize-Logging -Title "Logging Demo"
 }
 else{
-    $logname = Initialize-Logging -title "Logging Demo" -Verbose
+    $LogName = Initialize-Logging -Title "Logging Demo" -Verbose
 }
 
-Import-Module DummyModule -Force -ArgumentList $logname
+Import-Module .\DummyModule\DummyModule.psm1 -Force -ArgumentList $LogName
 
 $a = "VARIABLE-DEFINED-IN-SCRIPT"
 $PSBoundParameters.a = $a
@@ -76,22 +76,22 @@ $PSBoundParameters.a = $a
 New-LogEntry "This is a simple info"
 
 if($LogScenario -match 'TerminateMain'){
-    New-LogEntry "Some serious issue" -type Terminate -exitcode 33
+    New-LogEntry "Some serious issue" -Type Terminate -ExitCode 33
 }
 
 if($LogScenario -match 'Verbose|Silent'){
-    New-LogEntry "This is a detail entry" -indentlevel 1 -Verbose
+    New-LogEntry "This is a detail entry" -IndentLevel 1 -Verbose
 
     New-LogEntry "Call stack item of the script:"
     (Get-PSCallStack)[0] | Format-LogStringList | New-LogEntry -IndentLevel 1
 }
 
 if($LogScenario -match 'Warning|SimulateRunbook'){
-    New-LogEntry "This is a warning" -type Warning
+    New-LogEntry "This is a warning" -Type Warning
 }
 
 if($LogScenario -match 'Error|SimulateRunbook'){
-    New-LogEntry "This is some error" -type Error
+    New-LogEntry "This is some error" -Type Error
 }
 
 if($LogScenario -match 'Unhandled'){
@@ -101,7 +101,7 @@ if($LogScenario -match 'Unhandled'){
 SubFunction
 
 if($LogScenario -match 'Verbose|Silent|SimulateRunbook'){
-    New-LogEntry "This is a highlighted entry" -type Highlight
+    New-LogEntry "This is a highlighted entry" -Type Highlight
 }
 
 if($LogScenario -match 'ProgressBar|SimulateRunbook'){
@@ -109,12 +109,12 @@ if($LogScenario -match 'ProgressBar|SimulateRunbook'){
 
     foreach($a in $array){
         # Write-Progress -Activity "Processing element $a..." -Status "Processing..." -PercentComplete ($x/100) -SecondsRemaining ($calculate.the.seconds) -
-        Write-LogProgress -inputarray $array -action "Processing element $a..." -progresslogfirst 10
+        Write-LogProgress -InputArray $array -Action "Processing element $a..." -ProgressLogFirst 10
         Start-Sleep -Milliseconds 60
     }
 }
 
-$object1 = [pscustomobject] @{
+$object1 = [PSCustomObject] @{
                 One = 1
                 Two = "Some text"
                 Three = get-date
@@ -123,7 +123,7 @@ $object1 = [pscustomobject] @{
                 Secret = "This is a password"
             }
 
-$object2 = [pscustomobject] @{
+$object2 = [PSCustomObject] @{
                 One = 2
                 Two = "Some text 2"
                 Three = get-date
@@ -134,14 +134,14 @@ $object2 = [pscustomobject] @{
 
 if($LogScenario -match 'OutputObject'){
     New-LogEntry "List view:"
-    $object1, $object2 | Format-LogStringList -divide -hideNulls -hideProperty Secret | New-LogEntry -indentlevel 1
+    $object1, $object2 | Format-LogStringList -Divide -HideNulls -HideProperty Secret | New-LogEntry -IndentLevel 1
 
     New-LogEntry "Table view:"
-    $object1, $object2 | Format-LogStringTable -ExcludeProperty Secret | New-LogEntry -indentlevel 1
+    $object1, $object2 | Format-LogStringTable -ExcludeProperty Secret | New-LogEntry -IndentLevel 1
 }
 
 if($LogScenario -match 'OutputFile'){
-    $csv = New-LogFile -name "exportdata.csv"
+    $csv = New-LogFile -Name "exportdata.csv"
     New-LogEntry "Data is exported to '$csv'..."
 
     $object1, $object2 | Export-Csv -Path $csv -NoTypeInformation -Encoding Default
@@ -149,9 +149,9 @@ if($LogScenario -match 'OutputFile'){
 }
 
 if($LogScenario -match "AlternateLog"){
-    $mainLog = $logname
+    $mainLog = $LogName
 
-    $logname = Initialize-Logging -title "This is another log file" -name Item.log -datePart RITM1234567 -Verbose
+    $LogName = Initialize-Logging -Title "This is another log file" -Name Item.log -datePart RITM1234567 -Verbose
     New-LogEntry "This is an entry in alternate log file" 
 }
 
@@ -163,10 +163,10 @@ if($LogScenario -match 'ModuleLogging'){
 if($LogScenario -match "AlternateLog"){
     New-LogFooter
 
-    psedit $logging.$logname.logpath
+    psedit $logging.$LogName.LogPath
 
-    $logname = $mainLog
-    $PSBoundParameters.logname = $logname # HERE'S THE KEY STEP FOR MODULE FUNCTIONS!!!!
+    $LogName = $mainLog
+    $PSBoundParameters.LogName = $LogName # HERE'S THE KEY STEP FOR MODULE FUNCTIONS!!!!
     New-LogEntry "This is an entry in the main log again"
 }
 
@@ -176,18 +176,17 @@ if($LogScenario -match 'SimulateRunbook'){
 
 if($LogScenario -match 'AlternateLog'){
     if($LogScenario -match '^\d{2}AlternateLog'){
-        Invoke-Item $logging.$logname.logfolder
+        Invoke-Item $logging.$LogName.LogFolder
         Wait-Debugger
 
-        $file = $psISE.CurrentPowerShellTab.Files | Where-Object {$_.displayname -match '^Item-'}
+        $file = $psISE.CurrentPowerShellTab.Files | Where-Object {$_.DisplayName -match '^Item-'}
         [void] $psISE.CurrentPowerShellTab.Files.Remove($file)
     }
 
-    New-LogEntry "Normal exit from the script" -type Exit -ignorelog
+    New-LogEntry "Normal exit from the script" -Type Exit -IgnoreLog
 }
 else{
-    New-LogEntry "Normal exit from the script" -type Exit
+    New-LogEntry "Normal exit from the script" -Type Exit
 } 
 
 Write-Host "This will never get executed, it's after the 'exit'" -ForegroundColor Yellow
-

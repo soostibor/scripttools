@@ -7,14 +7,14 @@ function Get-DMInfo {
 
     $cs = Get-PSCallStack
 
-    New-LogEntry "Value of `$a via `$psboundparameters : $($cs[1].InvocationInfo.BoundParameters.a)" -type Highlight 
+    New-LogEntry "Value of `$a via `$PSBoundParameters : $($cs[1].InvocationInfo.BoundParameters.a)" -type Highlight 
 
-    "$(get-date) - SomeReturnValue"
+    "$(Get-Date) - SomeReturnValue"
 }
 
 if($LogName){
-    $logname = Initialize-Logging -mergeto $LogName
+    $LogName = Initialize-Logging -MergeTo $LogName
 }
 else{
-    $global:logname = Initialize-Logging -title "Dummy Module is imported directly" -Verbose -Path $env:TEMP
+    $global:LogName = Initialize-Logging -Title "Dummy Module is imported directly" -Verbose -Path $env:TEMP
 }
