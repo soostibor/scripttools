@@ -1,6 +1,6 @@
 ﻿<#
     Author: Tibor Soós (soos.tibor@hotmail.com)
-    Version: 1.7.0 [2025.10.03]
+    Version: 1.7.1 [2026.03.11]
 #>
 
 #region Logging
@@ -620,7 +620,7 @@ begin{
         $localverbose = $global:logging.$LogName._VerboseMode
     }
 
-    $environmentInvocation = $logcallstack | Where-Object {$_.Location -notmatch ($global:logging.$LogName._IgnoreLocation -join "|") -and $_.command -notmatch ($global:logging.$LogName._IgnoreCommand -join "|")} | Select-Object -First 1 -ExpandProperty InvocationInfo
+    # $environmentInvocation = $logcallstack | Where-Object {$_.Location -notmatch ($global:logging.$LogName._IgnoreLocation -join "|") -and $_.command -notmatch ($global:logging.$LogName._IgnoreCommand -join "|")} | Select-Object -First 1 -ExpandProperty InvocationInfo
 
     $baseindent = [math]::Max($logrealdepth - 1, 0)
 
@@ -1043,7 +1043,7 @@ param(
             throw "Name of the PS data file must end with '.data.ps1'"
         }
 
-        if($Path -notmatch "^\w+:|^\."){
+        if($Path -notmatch "^\w+:|^\.|^\\\\"){
             $Path = Join-Path (split-path $scriptinvocation.mycommand.path) "\Config\$Path"
         }
 
@@ -1075,9 +1075,9 @@ param(
 
         $topLevelLayer = $AST.Find({$true}, $false)
 
-        $topLevelExtentText = Get-Property -Object $topLevelLayer -PropertyPath "[0].EndBlock.Extent.Text" -ValueOnly
+        $topLevelExtentText = Get-Property -Object $topLevelLayer -PropertyPath '[0].EndBlock.Extent.Text' -ValueOnly
 
-        if(!$topLevelExtentText -or $topLevelExtentText.trim() -notmatch "^(\[ordered\]\s*)?@\{"){
+        if(!$topLevelExtentText -or $topLevelExtentText.trim() -notmatch '^(\[(ordered|pscustomobject|System\.Management\.Automation\.PSCustomObject)\]\s*)?\s*@\{'){
             throw "PS data file '$Path' must contain a single hash literal"
         }
 
@@ -1523,7 +1523,9 @@ param(
 )    
 
     $PSDataString = ConvertTo-PSData -Object $Object
-    Set-Content -Value $PSDataString -Path $Path -Encoding Default
+    $resolvedPath = Resolve-Path -Path (Split-Path -Path $Path) | Select-Object -ExpandProperty ProviderPath
+    $leaf = Split-Path -Path $Path -Leaf
+    Set-Content -Value $PSDataString -Path (Join-Path -Path $resolvedPath -ChildPath $leaf) -Encoding Default
 }
 
 function ConvertFrom-PSData {
@@ -1948,10 +1950,6 @@ process{
         return
     }
     
-    if($Object -isnot [System.Collections.IDictionary]){
-        return $Object
-    } 
-
     if($_currentdepth -gt $Depth){
         return
     }
@@ -1967,6 +1965,10 @@ process{
             return
         }
     }    
+
+    if($Object -isnot [System.Collections.IDictionary] -and $Object -isnot [System.Management.Automation.PSCustomObject]){
+        return $Object
+    } 
 
     if($To -eq 'hashtable'){
         $newObject = @{}
@@ -1992,7 +1994,6 @@ param(
     [Parameter(Mandatory = $true)]$prefix,
     [switch] $Force
 )
-    $psb = $null
     $cs = Get-PSCallStack
 
     if($cs.count -ge 2 -and !$Force){
@@ -2064,7 +2065,26 @@ param(
     if(!$LiteralPropertyName -and $PropertyPath -match '\.|\[\w+\](?=(\.|$))'){
         $nextProp, $PropertyPath = $PropertyPath -split '\.|(?=\[\w+\]$)', 2
 
-        if($nextProp){            
+        if($nextProp){    
+            $testProp = Get-Property -Object $Object -PropertyPath $nextProp
+
+            if(!$testProp.PropertyExists){
+                if($Force){
+                    $nextProp2, $PropertyPath2 = $PropertyPath -split '\.|(?=\[\w+\]$)', 2
+                    $value2 =@{$nextProp2 = $null}
+
+                    if($Object -isnot [System.Collections.IDictionary]){                        
+                        $value2 = [PSCustomObject] $value2
+                    }
+
+                    Update-Property -Object $Object -PropertyPath $nextProp -Value $value2
+                }
+                else{
+                    Write-Error -Message "Property '$nextProp' doesn't exist on object '$Object'"
+                    return
+                }
+            }
+            
             $nextObj = $Object.$nextProp
             Update-Property -Object $nextObj -PropertyPath $PropertyPath -Value $Value -PassThru:$PassThru -Force:$Force -objectToReturn $objectToReturn
             return
@@ -2400,8 +2420,6 @@ begin{
             $pipeline = $true            
         }
 
-        $excludeType = $SkipTypesDefault + $SkipTypesAdditional | &{process{$_ -replace "\[", '[[' -replace "\]", ']]'}}
-
         if(!$_ObjectName){
             if($pipeline){
                 $_ObjectName = '$Input'
@@ -2459,7 +2477,13 @@ process{
         }
         else{
             if(!$LiteralSearch -and $origpattern -match "<[^>]+>"){
-                $Pattern = [regex]::Replace($origpattern, "<([^>]+)>", {[regex]::Escape($o.($args[0].value -replace "<|>"))})
+                $Pattern = [regex]::Replace(
+                                    $origpattern, "<([^>]+)>", {
+                                        [regex]::Escape(
+                                            (Get-Property -Object $o -PropertyPath ($args[0].value -replace "^<|>$") -ValueOnly)
+                                        )
+                                    }
+                                )
             }
 
             if($o -is [System.Collections.IDictionary]){
@@ -2471,10 +2495,6 @@ process{
 
             foreach($prop in ($properties | Sort-Object -Property Name)){
                 $PropName = $prop.Name
-
-                if($PropName -eq 'loop'){
-                    $dummy = 0
-                }
 
                 if(
                     $prop.membertype -ne 'AliasProperty' -and 
@@ -2778,7 +2798,6 @@ param(
                         $ra -is [System.DBNull]
 
             if((!$Excludedifferent -and $equal -ne '==') -or ($includeequal -and $equal -eq '==')){    
-                $dummy = 0
                 if(($Hide -eq 'BothEmpty' -and $raempty -and $daempty) -or
                     ($Hide -eq 'Empty' -and ($raempty -or $daempty)) -or
                     ($Hide -eq 'NonEmpty' -and (!$raempty -or !$daempty))){
@@ -3170,7 +3189,7 @@ process{
             $displayKey = "'$key'"
         }
 
-        Expand-Property -Object $Object.$key -ObjectName $displayPath -MaxDepth $MaxDepth -LeafOnly:$LeafOnly -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional -PropertyPath $(if($PropertyPath){$PropertyPath + '.' + $key}else{$key})
+        Expand-Property -Object $Object.$key -ObjectName $displayPath -MaxDepth $MaxDepth -LeafOnly:$LeafOnly -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional -PropertyPath $(if($PropertyPath){$PropertyPath + '.' + $displayKey}else{$displayKey})
     }
 
     if($Object -is [System.Collections.IList] -and $_currentDepth -lt $MaxDepth){
