@@ -97,7 +97,7 @@ begin{
     $LogFileName = Get-MSLogFileName
 
     if(!$LogFileName -or !$global:logging -or !$global:logging.$LogFileName) {
-        throw 'A valid LogFile Name and $global:logging context is required.'
+        throw 'A valid LogFileName and $global:logging context is required.'
     }
 
     $retry = $true
@@ -108,7 +108,7 @@ begin{
     do {
         try {
             $locked = $false
-            $handle = [io.file]::AppendText($path)
+            $handle = [io.file]::AppendText($Path)
         }
         catch {
             $global:Error.RemoveAt(0)
@@ -180,7 +180,7 @@ function Format-MSLogJSON {
     requested properties, and converts the result to JSON text. The output can optionally be wrapped
    with a border for consistent log presentation.
 .EXAMPLE
-    Get-Service Select-Object -First 2 | Format-MSLogJSON -Depth 3
+    Get-Service | Select-Object -First 2 | Format-MSLogJSON -Depth 3
    Converts service objects to JSON output lines.
 .EXAMPLE
    @{ Name = 'Task'; Status = 'Running' } | Format-MSLogJSON -Bordered
@@ -227,7 +227,7 @@ param(
 
     try{
             $json = $convertedObjects | Select-Object @sosplatting | ConvertTo-Json -Depth $depth -ErrorAction Stop
-            $lines = $json -split [Environment]:: NewLine |
+            $lines = $json -split [Environment]::NewLine |
                 Where-Object -FilterScript {$ -and $_.trim()}
 
         if($Bordered) {
@@ -257,7 +257,7 @@ function Format-MSLogStringList {
     Get-Process | Select-Object -First 1 | Format-MSLogStringList
     Formats the first process object as aligned key-value lines.
 .EXAMPLE
-    @{ User = 'svc'; Password = 'secret' } | Format-MSLogStringList -Hide Property Password -Bordered
+    @{ User = 'svc'; Password = 'secret' } | Format-MSLogStringList -HideProperty Password -Bordered
     Formats a hashtable and masks the Password value.
 .INPUTS
     System.Object
@@ -291,7 +291,7 @@ begin {
     $lines = @()
 }
 process{
-    if($object -is [hashtable]){
+    if($Object -is [hashtable]){
         $Object = [pscustomobject] $Object
     }
 
@@ -312,8 +312,8 @@ process{
        }
     }
 
-    if($object -is [string]) {
-        $lines += " " * $IndentLevel * 4 + $0bject
+    if($Object -is [string]) {
+        $lines += " " * $IndentLevel * 4 + $Object
     }
     elseif($selecttedprops) {
         if($Sort) {
@@ -408,7 +408,7 @@ param(
     }
 
     $tableString = $convertedObjects | Select-Object @ftsplatting | Format-Table -AutoSize | Out-String
-    $lines = $tableString -split [Environment]:: NewLine |
+    $lines = $tableString -split [Environment]::NewLine |
        Where-Object -FilterScript {$_ -and $_.trim()}
 
     if($Bordered){
@@ -499,7 +499,7 @@ function Get-MSLogIsAdministrator {
 .SYNOPSIS
     Returns whether the current identity is a local administrator.
 .DESCRIPTION
-    This function inspects the current Windows identity group SIDS and checks for membership
+    This function inspects the current Windows identity group SIDs and checks for membership
     in the built-in Administrators group.
 .EXAMPLE
    Get-MSLogIsAdministrator
@@ -514,7 +514,7 @@ function Get-MSLogIsAdministrator {
     $user = [System.Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object -TypeName Security.Principal.WindowsPrincipal -ArgumentList $user
     $groupSIDs = $principal.Identity.Groups | Select-Object -ExpandProperty value
-    $IsAdministrator = [bool] ($groupSIDS -match $builtinAdministratorsSID)
+    $IsAdministrator = [bool] ($groupSIDs -match $builtinAdministratorsSID)
     $IsAdministrator
 }
 
@@ -531,10 +531,10 @@ function Initialize-MSLogging {
     creates the log file, configures formatting columns, and writes initial header information.
     It returns the resolved log key that downstream logging functions use.
 .EXAMPLE
-    $LogFileName = Initialize-MS Logging -Title 'Patch Run' -Name 'Patch.log' -Path 'C:\Logs'
+    $LogFileName = Initialize-MSLogging -Title 'Patch Run' -Name 'Patch.log' -Path 'C:\Logs'
     Initializes logging and returns the active log key.
 .EXAMPLE
-    Initialize-MSLogging -Simulate Runbook -Name 'Runbook.log'
+    Initialize-MSLogging -SimulateRunbook -Name 'Runbook.log'
     Initializes logging with runbook simulation behavior and temporary log storage.
 .INPUTS
     None. This function does not accept pipeline input.
@@ -649,9 +649,9 @@ param(
         $scriptpath = Split-Path -Path $allcs[0].InvocationInfo.ScriptName
         $scriptname = Split-Path -Path $allcs[0].InvocationInfo.ScriptName -Leaf
 
-        Add-Member -InputObject $scriptinvocation -Member Type NoteProperty -Name LogInvocationName -Value $scriptname -Force
+        Add-Member -InputObject $scriptinvocation -MemberType NoteProperty -Name LogInvocationName -Value $scriptname -Force
 
-        $scripttext = get-content -Path $allcs[0].Invocation Info.ScriptName
+        $scripttext = get-content -Path $allcs[0].InvocationInfo.ScriptName
         $versionPattern = 'Version\s*:\s*(?<version>\d+\.\d+(\.\d+)*)(\s*\((?<releasedate>\d{4}\.\d{2}\.\d{2})\))?'
         $versionfound = $scripttext -match $versionPattern
         if($versionfound) {
@@ -707,7 +707,7 @@ param(
         }
     }
 
-    $columns = @('"DateTime"             ','"Line"   ','"Type"     ')
+    $columns = @('"DateTime"           ','"Line"  ','"Type"     ')
     if($additionalColumns) {
         $columns += $additionalColumns | ForEach-Object -Process {
             "{0,$(-([math]::max($_.width, $_.name.length)+2))}" -f """$($_.name)"""
@@ -808,7 +808,7 @@ param(
                     throw $_
                 }
                 elseif($ErrorActionPreference -eq 'Continue'){
-                   Write-Error Message $_.exception.message
+                   Write-Error -Message $_.exception.message
                 }
                 elseif($ErrorActionPreference -eq 'Ignore') {
                     $global:Error.RemoveAt(0)
@@ -829,14 +829,14 @@ param(
     if($scriptinvocation -and $scriptinvocation.BoundParameters.keys.where({$_ -ne 'logfilename'}).count) {
         [PSCustomObject] [hashtable] $scriptinvocation.BoundParameters |
             Format-MSLogStringList -excludeproperty LogFileName |
-            FormatBorder -title "Bound Parameters:" -indent level 1 |
+            FormatBorder -title "Bound Parameters:" -indentlevel 1 |
                 New-MSLogEntry -indentlevel 1 -LogFileName $logFile.key
     }
 
     if($ScriptImplicitParams = Get-Variable -Name ScriptImplicitParams -Scope Global -ErrorAction Ignore -ValueOnly) {
         [PSCustomObject] $ScriptImplicitParams | Format-MSLogStringList |
             FormatBorder -title "Parameters with defaults:" -indentlevel 1 |
-                New-MSLogEntry -indent level 1 -LogFileName $logFile.key
+                New-MSLogEntry -indentlevel 1 -LogFileName $logFile.key
    }
    $logFile.DelayedLogEntries | New-MSLogEntry -indentlevel 1 -LogFileName $logFile.key
 
@@ -881,7 +881,7 @@ param(
     [switch] $UseAbsoluteIndent,
     # Keeps current line open without newline.
     [switch] $NoNewLine,
-   # Controls how line continuation is handled. (Use -NoNewLine, this parameter is only for backwards compatibility)
+    # Controls how line continuation is handled. (Use -NoNewLine, this parameter is only for backwards compatibility)
     [ValidateSet('nonew', 'extend')] [string] $Modifier = 'extend',
     # Displays output without writing to log file.
     [switch] $DisplayOnly,
@@ -910,7 +910,7 @@ begin{
     }
 
     if($null -eq $LogFileName) {
-        throw 'A valid LogFile Name and $global: logging context is required.'
+        throw 'A valid LogFileName and $global:logging context is required.'
     }
 
     $relativelevel = 0
@@ -1026,7 +1026,7 @@ process{
             }
             else{
                 $ts = Get-Date -Format 'yyyy.MM.dd HH:mm:ss'
-                $line = "[$ts], [$(([string] $linenumber).PadLeft(6))], [$($Type.toupper().padright(9))]"
+                $line = "[$ts],[$(([string] $linenumber).PadLeft(6))],[$($Type.toupper().padright(9))]"
                 if($global:logging.$LogFileName._additionalColumns) {
                     foreach ($col in $global:logging.$LogFileName._additionalColumns){
                         $colVal = $col.Rule.GetNewClosure().invoke()[0]
@@ -1036,7 +1036,7 @@ process{
                 $line += ", >$(" " * $IndentLevel * 4)$mess"
             }
 
-            if($NoNewLine -or $Modifier -eq 'NoNew' -or $global:logging. $LogFileName._LastLine){
+            if($NoNewLine -or $Modifier -eq 'NoNew' -or $global:logging.$LogFileName._LastLine){
                 $global:logging.$LogFileName._LastLine += $line
             }
 
@@ -1066,7 +1066,7 @@ process{
                 elseif($Type -in 'Warning', '1'){
                    Write-Warning -Message $line
                 }
-                elseif($Type -match '^(Progress | Highlight) $' -and
+                elseif($Type -match '^(Progress|Highlight)$' -and
                    @($PSBoundParameters.logcallstack | Where-Object -FilterScript {
                        $_.ScriptName -ne $PSBoundParameters.logcallstack[0].ScriptName
                     }).Count -le 1) {
@@ -1074,7 +1074,7 @@ process{
                 }
             }
            else{
-               Write-Host -Object $line @param -NoNewline: $NoNewLine
+               Write-Host -Object $line @param -NoNewline:$NoNewLine
             }
         }
     }
@@ -1163,7 +1163,7 @@ end{
                     exit $ExitCode
                 }
                 else{
-                    [environment]:: Exit($ExitCode)
+                    [environment]::Exit($ExitCode)
                 }
             }
         }
@@ -1243,7 +1243,7 @@ param(
         Source = $EventLogSource
         EventId = $EventId
         EntryType = $Type
-        Message = $message-join "`r`n"
+        Message = $message -join "`r`n"
         Category = 0
     }
     try{
@@ -1267,10 +1267,10 @@ function New-MSLogFile {
     date and time by default or date-only when Daily is used, removes obsolete log files according to retention,
     and returns file metadata including a log key and delayed log entries.
 .EXAMPLE
-    New-MSLogFile -Name 'Job.log' -Path 'C:\Logs -KeepDays 30
+    New-MSLogFile -Name 'Job.log' -Path 'C:\Logs' -KeepDays 30
     Creates or resolves today's log file and applies 30-day retention cleanup.
 .EXAMPLE
-    New-MSLogFile -Name 'Job.log' -Path 'C:\Logs -Daily -Overwrite
+    New-MSLogFile -Name 'Job.log' -Path 'C:\Logs' -Daily -Overwrite
    Creates a date-only log file and overwrites any existing file with the same name.
 .INPUTS
     None. This function does not accept pipeline input.
@@ -1321,19 +1321,19 @@ param(
     }
 
     if($LogFileName) {
-        $delayedLogEntries = Remove-MS LogObsolete File -KeepDays $KeepDays -LogFileName $LogFileName
+        $delayedLogEntries = Remove-MS LogObsoleteFile -KeepDays $KeepDays -LogFileName $LogFileName
     }
     else{
         $delayedLogEntries = Remove-MS LogObsoleteFile -BaseFileName $Name -Path $Path -KeepDays $KeepDays
     }
 
     if($Overwrite -or (!(Test-Path -Path (Join-Path -Path $Path -ChildPath $filename)))){
-        $file = New-Item -Path $Path -Name $filename -ItemType file -Force: $Overwrite |
-            Add-Member -Member Type NoteProperty -Name New -Value $true -Pass Thru -ErrorAction Stop
+        $file = New-Item -Path $Path -Name $filename -ItemType file -Force:$Overwrite |
+            Add-Member -MemberType NoteProperty -Name New -Value $true -PassThru -ErrorAction Stop
     }
     else{
         $file = Get-Item -Path (Join-Path -Path $Path -ChildPath $filename) |
-            Add-Member -Member Type NoteProperty -Name New -Value $false -PassThru
+            Add-Member -MemberType NoteProperty -Name New -Value $false -PassThru
     }
 
     if(!$file){
@@ -1341,7 +1341,7 @@ param(
     }
 
     Add-Member -InputObject $file -MemberType NoteProperty -Name Key -Value $key
-    Add-Member -InputObject $file -MemberType Note Property -Name Delayed LogEntries -Value $delayed LogEntries -Pass Thru
+    Add-Member -InputObject $file -MemberType NoteProperty -Name DelayedLogEntries -Value $delayedLogEntries -PassThru
 }
 
 ###########################################
@@ -1379,7 +1379,7 @@ param(
     if(!$LogFileName -or !$global:logging.ContainsKey($LogFileName)) {
         $LogFileName = $null
         if($env:AZUREPS_HOST_ENVIRONMENT -eq 'AzureAutomation' -or $host.name -eq 'Default Host'){
-            Write-Error -Message "LogFileName $LogFileName' is not valid"
+            Write-Error -Message "LogFileName '$LogFileName' is not valid"
             $global:Error.RemoveAt(0)
         }
         else{
@@ -1391,8 +1391,8 @@ param(
 
     if($LogFileName) {
         $footer =   "LogFileName   : $LogFileName",
-                    "Runtime       : $([timespan]:: FromSeconds($seconds).tostring())",
-                    "Errors Logged : $($global:logging.$LogFileName._ErrorsLogged)",
+                    "Runtime       : $([timespan]::FromSeconds($seconds).tostring())",
+                    "ErrorsLogged  : $($global:logging.$LogFileName._ErrorsLogged)",
                     "WarningsLogged: $($global:logging.$LogFileName._WarningsLogged)",
                     "ParentProcess : $($global:logging.$LogFileName._parentprocess.name)"
    }
@@ -1421,10 +1421,10 @@ function Remove-MSLogObsoleteFile {
    log context is available, removal messages are collected as delayed log entries and returned
    for later logging.
 .EXAMPLE
-   Remove-MSLogObsolete File -BaseFileName 'Job.log' -Path 'C:\Logs -KeepDays 30
+   Remove-MSLogObsoleteFile -BaseFileName 'Job.log' -Path 'C:\Logs' -KeepDays 30
    Deletes all date-stamped Job log files older than 30 days from C:\Logs.
 .EXAMPLE
-   Remove-MSLogObsolete File -BaseFileName 'Job.log' -Path 'C:\Logs -KeepDays 0
+   Remove-MSLogObsoleteFile -BaseFileName 'Job.log' -Path 'C:\Logs -KeepDays 0
    Skips retention cleanup (KeepDays 0 disables removal).
 .INPUTS
    None. This function does not accept pipeline input.
@@ -1432,7 +1432,7 @@ function Remove-MSLogObsoleteFile {
    System.String[]
    Returns delayed log entry strings when no active log context exists at call time.
 #>
-[cmdletbinding (DefaultParameterSetName = 'ByFile')]
+[cmdletbinding(DefaultParameterSetName = 'ByFile')]
 param(
     # Name of the files to be purged without the timestamp pattern, if the files have this name pattern 'DemoLog_20260630_132442.log' then the -BaseFileName is 'DemoLog.log'.
     [Parameter(Mandatory = $true, ParameterSetName = 'ByFile')] [Alias('ScriptName')] [string] $BaseFileName,
@@ -1459,7 +1459,7 @@ param(
            $extension = '.log'
         }
 
-        $searchname = ($BaseFileName -replace "\.[^,]+$") + "_*" + $extension
+        $searchname = ($BaseFileName -replace "\.[^.]+$") + "_*" + $extension
 
         Get-ChildItem -Path $Path -Filter $searchname -ErrorAction Ignore |
             Where-Object -FilterScript {((get-date) - $_.LastWriteTime).totaldays -gt $KeepDays} |
@@ -1469,11 +1469,11 @@ param(
                 try{
                     Remove-Item -Path $_.FullName -ErrorAction Ignore
                     if(!$LogFileName -or !$loggingVar -or !$global:logging.$LogFileName) {
-                       $delayedLogEntries += "Removing obsolete file: '$($_.FullName)*"
+                       $delayedLogEntries += "Removing obsolete file: '$($_.FullName)'"
                     }
                     else{
                         $entryParams = @{
-                            message     = "Removing obsolete file: '$($_.FullName)*"
+                            message     = "Removing obsolete file: '$($_.FullName)'"
                             indentlevel = 1
                             LogFileName = $LogFileName
                         }
@@ -1486,7 +1486,7 @@ param(
                         $delayedLogEntries += "Failed to remove obsolete file: '$($_.FullName)'"
                     }
                     else{
-                       $entryParams = @{
+                        $entryParams = @{
                             message     = "Failed to remove obsolete file: '$($_.FullName)'"
                             indentlevel = 1
                             LogFileName = $LogFileName
@@ -1501,7 +1501,7 @@ param(
 }
 
 ###########################################
-######## Search -MSLogEntries
+######## Search-MSLogEntries
 ###########################################
 
 function Search-MSLogEntries {
@@ -1513,10 +1513,10 @@ function Search-MSLogEntries {
     as CSV records, applies an optional filter script, and returns formatted table output.
     It can search across all date-stamped files and supports sorting.
 .EXAMPLE
-    Search -MSLogEntries -LogFileNames 'Job.log'
+    Search-MSLogEntries -LogFileNames 'Job.log'
     Returns default filtered entries for the specified log name.
 .EXAMPLE
-    Search -MSLogEntries -LogPath 'C:\Logs -AllDates -FilterScript { $_.Type -eq 'ERROR' }
+    Search-MSLogEntries -LogPath 'C:\Logs' -AllDates -FilterScript { $_.Type -eq 'ERROR' }
     Searches all dated logs in the folder and returns only error entries.
 .INPUTS
     System.String[]
@@ -1548,17 +1548,17 @@ begin{
         }
     }
     elseif($LogFileNames) {
-        foreach ($1n in $LogFileNames) {
-            $LogPath += $global:logging.$1n.LogPath
+        foreach ($lp in $LogFileNames) {
+            $LogPath += $global:logging.$lp.LogPath
         }
     }
 }
 process{
     $DefaultFilterScript = { $_.Line -match '^\[\s*\d+\]$' }
 
-    foreach ($1p in $LogPath) {
+    foreach ($lp in $LogPath) {
         if($AllDates) {
-            $lp = $1p -replace "-\d{8,}(?=\.[^\.]+$)", '*'
+            $lp = $lp -replace "-\d{8,}(?=\.[^\.]+$)", '*'
         }
         if($lp -notmatch "\.log"){
             $lp += "\*"
@@ -1566,16 +1566,16 @@ process{
 
         if($SortBy) {
             if($FilterScript){
-               Get-Item -Path $lp -PipelineVariable path -ErrorAction Ignore | ForEach-Object -Process {$_.fullname} |
+                Get-Item -Path $lp -PipelineVariable path -ErrorAction Ignore | ForEach-Object -Process {$_.fullname} |
                     Import-Csv -Encoding Default |
-                       Where-Object -FilterScript $DefaultFilterScript |
-                       Where-Object -FilterScript $FilterScript |
+                        Where-Object -FilterScript $DefaultFilterScript |
+                        Where-Object -FilterScript $FilterScript |
                            Sort-Object -Property $SortBy -Descending:$Descending |
                             select-object -Property @{n="LogFileName"; e={$path.name}}, * |
                         Format-MSLogStringTable
             }
             else{
-               Get-Item -Path $lp -PipelineVariable path -ErrorAction Ignore | ForEach-Object -Process {$_.fullname} |
+                Get-Item -Path $lp -PipelineVariable path -ErrorAction Ignore | ForEach-Object -Process {$_.fullname} |
                     Import-Csv -Encoding Default |
                         Where-Object -FilterScript $DefaultFilterScript |
                         Sort-Object -Property $SortBy -Descending:$Descending |
@@ -1585,7 +1585,7 @@ process{
        }
        else{
             if($FilterScript) {
-               Get-Item -Path $lp -PipelineVariable path -ErrorAction Ignore |
+                Get-Item -Path $lp -PipelineVariable path -ErrorAction Ignore |
                     ForEach-Object -Process {$_.fullname} |
                     Import-Csv -Encoding Default |
                     Where-Object -FilterScript $DefaultFilterScript |
@@ -1593,7 +1593,7 @@ process{
                     select-object -Property @{n="LogFileName"; e={$path.name}}, * | Format-MSLogStringTable
             }
             else{
-               Get-Item -Path $lp -PipelineVariable path -Error Action Ignore |
+                Get-Item -Path $lp -PipelineVariable path -ErrorAction Ignore |
                     ForEach-Object -Process {$_.fullname} |
                     Import-Csv -Encoding Default |
                     Where-Object -FilterScript $DefaultFilterScript |
@@ -1639,7 +1639,7 @@ function Write-MSLogProgress {
         [string] $LogFileName,
         # Seconds before first progress log message.
         [int] $ProgressLogFirst
-   )
+    )
 
     if(!$inputarray -or !$inputarray.count){
         return
@@ -1671,19 +1671,19 @@ function Write-MSLogProgress {
         Add-Member -InputObject $global:logging.$LogFileName._Progress -MemberType NoteProperty -Name ArrayRef -Value $null
     }
 
-    if(-not [object]:: ReferenceEquals($inputarray, $global:logging.$LogFileName._Progress.ArrayRef)) {
-       $global:logging.$LogFileName._Progress.ArrayRef = $inputarray
-       $global:logging.$LogFileName._Progress.Start = get-date
-       $global:logging.$LogFileName._Progress.BarNext = get-date
-       $global:logging.$LogFileName._Progress.Counter = 0
-       $global:logging.$LogFileName._Progress.LogNext = (get-date).AddSeconds($ProgressLogFirst)
+    if(-not [object]::ReferenceEquals($inputarray, $global:logging.$LogFileName._Progress.ArrayRef)) {
+        $global:logging.$LogFileName._Progress.ArrayRef = $inputarray
+        $global:logging.$LogFileName._Progress.Start = get-date
+        $global:logging.$LogFileName._Progress.BarNext = get-date
+        $global:logging.$LogFileName._Progress.Counter = 0
+        $global:logging.$LogFileName._Progress.LogNext = (get-date).AddSeconds($ProgressLogFirst)
     }
 
-    $progress = $global:logging.$LogFileName.Progress
+    $progress = $global:logging.$LogFileName._Progress
     $verboseActive = $global:logging.$LogFileName._VerboseMode -or $PSBoundParameters.verbose
     if((Get-Date) -ge $progress.BarNext -and $verboseActive) {
         if(!$PSBoundParameters.ContainsKey('percent')){
-           $percent = $progress.Counter / $inputarray.count * 100
+            $percent = $progress.Counter / $inputarray.count * 100
         }
 
         if($percent -gt 100){
@@ -1694,17 +1694,17 @@ function Write-MSLogProgress {
             $timeleft = [int]::MaxValue
         }
         else{
-            $elapsed = ((Get-Date) - $progress.Start).totalseconds
+            $elapsed  = ((Get-Date) - $progress.Start).totalseconds
             $timeleft = $elapsed * ($inputarray.Count - $progress.Counter) / $progress.Counter
         }
 
         $done = "{0,$("$($inputarray.Count)".Length)}" -f $progress.Counter
         $left = "{0,$("$($inputarray.Count)".Length)}" -f ($inputarray.Count - $progress.Counter)
         $wpSplat = @{
-           Activity          = $Activity
-           Status            = "All: $($inputarray.Count) Done: $done Left: $left"
-           PercentComplete   = $percent
-           SecondsRemaining  = $timeleft
+            Activity          = $Activity
+            Status            = "All: $($inputarray.Count) Done: $done Left: $left"
+            PercentComplete   = $percent
+            SecondsRemaining  = $timeleft
         }
         Write-Progress @wpSplat
         $progress.BarNext = (get-date).AddSeconds($progress.BarSec)
@@ -1712,11 +1712,11 @@ function Write-MSLogProgress {
 
     if((Get-Date) -ge $progress.LogNext) {
         if($progress.Counter -eq 0) {
-           $timeleft = [int]::MaxValue
+            $timeleft = [int]::MaxValue
         }
         else{
-           $elapsed = ((Get-Date) - $progress.Start).totalseconds
-           $timeleft = [int] ($elapsed * ($inputarray.Count - $progress.Counter) / $progress.Counter)        
+            $elapsed  = ((Get-Date) - $progress.Start).totalseconds
+            $timeleft = [int] ($elapsed * ($inputarray.Count - $progress.Counter) / $progress.Counter)        
         }
 
         $timeleft = [timespan]::FromSeconds($timeleft).tostring()
@@ -1727,14 +1727,14 @@ function Write-MSLogProgress {
         $progressMsg = "All: $($inputarray.Count) Done: $done Left: $left Estimated time left: $timeleft"
         New-MSLogEntry -message $progressMsg -type Progress
 
-        $progress.LogNext = (get-date). AddMinutes($progress.LogMin)
+        $progress.LogNext = (get-date).AddMinutes($progress.LogMin)
     }
 
     $progress.Counter++
 }
 
 ###########################################
-######## Write-MS LogUnhandled Errors
+######## Write-MSLogUnhandledErrors
 ###########################################
 
 function Write-MSLogUnhandledErrors {
@@ -1807,12 +1807,12 @@ param(
         )
    ){
         if($PSDatahive.$key -is [System.Collections.IDictionary]){
-            ResolveDynamic Data -PSDatahive $PSDatahive.$key -dontexpand:$dontexpand
+            ResolveDynamicData -PSDatahive $PSDatahive.$key -dontexpand:$dontexpand
         }
         elseif($PSDatahive.$key -is [System.Object[]]){
             for($i = 0; $i -lt $PSDatahive.$key.count; $i++){
                 if($PSDatahive.$key[$i] -is [System.Collections.IDictionary]){
-                    ResolveDynamicData -PSDatahive $PSDatahive.$key[$i] -dontexpand: $dontexpand
+                    ResolveDynamicData -PSDatahive $PSDatahive.$key[$i] -dontexpand:$dontexpand
                 }
                 else{
                     $result = ResolveDynamicData -PSDatahive $PSDatahive.$key[$i] -dontexpand:$dontexpand
@@ -1821,8 +1821,8 @@ param(
                         $dontexpand = $true
                         break
                     }
-               }
-           }
+                }
+            }
         }
         elseif($PSDatahive.$key -is [scriptblock] -and ($PSDatahive.Keys -notcontains 'Condition' -or $PSDatahive.Condition)) {
             [ref] $errors = $null
@@ -1867,7 +1867,7 @@ param(
                 [pscustomobject]@{
                     UpdatedElement = $PSDatahive.$key
                     SkipAll = $dontexpand
-               }
+                }
             }
         }
     }
@@ -1893,7 +1893,7 @@ function MergeHives {
             $h.value.remove($ca)
         }
 
-        $target. ($h.key) = $h.value
+        $target.($h.key) = $h.value
     }
     else{
         try{
@@ -1953,7 +1953,7 @@ param(
             throw "Name of the PS data file must end with '.data.ps1'"
         }
 
-        if($Path -notmatch "^\w+:|^\.|^\\\\"){\
+        if($Path -notmatch "^\w+:|^\.|^\\\\"){
             $Path = Join-Path (split-path $scriptinvocation.mycommand.path) "\Config\$Path"
         }
 
@@ -1967,13 +1967,13 @@ param(
         $authenticode = Get-AuthenticodeSignature -FilePath $realPath -ErrorAction Ignore
 
         if(!$authenticode -or $authenticode.Status -notin 'Valid', 'NotSigned'){
-            throw "Signature is not valid on data file '$realPath"
+            throw "Signature is not valid on data file '$realPath'"
         }
 
         $tokens = [System.Management.Automation.Language.Token[]]::new(1)
         $errors = [System.Management.Automation.Language.ParseError[]]::new(1)
 
-        $AST = [System.Management.Automation.Language.Parser]:: ParseFile(
+        $AST = [System.Management.Automation.Language.Parser]::ParseFile(
                     $realPath,
                     [ref] $tokens,
                     [ref] $errors
@@ -2002,7 +2002,7 @@ param(
 
         $errors = $false
 
-        for($i=1; $i -lt $allCommands.count; $i++){
+        for($i = 1; $i -lt $allCommands.count; $i++){
             $command = $allCommands[$i]
 
             $currentLevel = $command
@@ -2028,6 +2028,7 @@ param(
                     throw "Commands are allowed only in scriptblocks: $($prev.extent)"
             }
         }
+
         try{
             $Config = & $Path
         }
@@ -2084,7 +2085,7 @@ param(
         $open = ""
     }
 
-    if($null -eq $object) {
+    if($null -eq $Object) {
         $fullType = "NULL"
         $shortType = "NULL"
     }
@@ -2098,11 +2099,11 @@ param(
             $brackets = '[]'
         }
 
-        if($object -is [System.Enum]){
+        if($Object -is [System.Enum]){
             $fullType = "System.Enum$($brackets)"
             $shortType = $Object.gettype().fullname + $brackets
         }
-        elseif($fullType -notmatch '\.'){\
+        elseif($fullType -notmatch '\.'){
             $fullType = 'System.Management.Automation.PSCustomObject' + $brackets
         }
     }
@@ -2114,10 +2115,10 @@ param(
         }
         else{
             if($Compress){
-               $open += "[$($originalType)]@("
+                $open += "[$($originalType)]@("
             }
             else{
-               $open += "[$($originalType)] @("
+                $open += "[$($originalType)] @("
             }
             $close = ")"
         }
@@ -2129,18 +2130,18 @@ param(
             $joinchar = ", "
         }
 
-       $multiline = $false
-       $strelements = @()
-       foreach($elem in $object) {
+        $multiline = $false
+        $strelements = @()
+        foreach($elem in $Object) {
             $strelem = ConvertTo-PSData -Object $elem -Compress:$Compress
             
             if($elem -is [System.Object[]]){
-               $strelem = "," + $strelem
+                $strelem = "," + $strelem
             }
 
             $strelements += $strelem
             if(!$multiline -and $strelem -match '\n'){
-               $multiline = $true
+                $multiline = $true
             }
         }
 
@@ -2150,13 +2151,13 @@ param(
                             (($strelements | &{process{
                                 $parts = $_ -split "\r\n"
                                 ($parts | &{process{" " * 4 + $_}}) -join "`r`n"
-                           }}) -join $joinchar) +
-                           $close
+                            }}) -join $joinchar) +
+                            $close
 
             $strelements | &{process{
-                        $parts = $_ -split "`r`n"
-                        ($parts | &{process{"" * $IndentLevel * 4 + $_}}) -join "`r`n"
-                    }}
+                                $parts = $_ -split "`r`n"
+                                ($parts | &{process{"" * $IndentLevel * 4 + $_}}) -join "`r`n"
+                            }}
         }
         else{
             if($Compress){
@@ -2186,11 +2187,11 @@ param(
                                         $out = @($open)
                                     }
                                     else{
-                                       $out = @(" " * $IndentLevel * 4 + $open)
+                                        $out = @(" " * $IndentLevel * 4 + $open)
                                     }
 
                                     foreach($key in $Object.keys) {
-                                       $out += ConvertTo-PSData -Object $0bject.$key -IndentLevel ($IndentLevel + 1) -Name $key -Compress:$Compress
+                                       $out += ConvertTo-PSData -Object $Object.$key -IndentLevel ($IndentLevel + 1) -Name $key -Compress:$Compress
                                     }
 
                                     if($Compress) {
@@ -2198,7 +2199,7 @@ param(
                                     }
                                     else{
                                         $out += " " * $IndentLevel * 4 + "}"
-                                        $out -join "r`n"
+                                        $out -join "`r`n"
                                     }
                                     break
                                 }
@@ -2232,7 +2233,7 @@ param(
                                         $open + "'$($Object -replace "'", "''")'"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "'$($Object -replace "'","''")'"
+                                        " " * $IndentLevel * 4 + $open + "'$($Object -replace "'", "''")'"
                                     }
                                     break
                                 }
@@ -2242,7 +2243,7 @@ param(
                                         $open + "[char]'$Object'"
                                     }
                                     else{
-                                        " " + $IndentLevel * 4 + $open + "[char] '$Object'"
+                                        " " * $IndentLevel * 4 + $open + "[char] '$Object'"
                                     }
                                     break
                                 }
@@ -2259,10 +2260,10 @@ param(
 
             "System.Management.Automation.ScriptBlock" {
                                     if($Compress) {
-                                        $open + "{$object}"
+                                        $open + "{$Object}"
                                     }
                                     else{
-                                          " " * $IndentLevel * 4 + $open + "{$object}"
+                                        " " * $IndentLevel * 4 + $open + "{$Object}"
                                     }
                                     break
                                 }
@@ -2282,7 +2283,7 @@ param(
                                         $open + "[TimeSpan]'$Object'"
                                     }
                                     else{
-                                         " " * $IndentLevel * 4 + $open + "[TimeSpan] '$Object'"
+                                        " " * $IndentLevel * 4 + $open + "[TimeSpan] '$Object'"
                                     }
                                     break
                                 }
@@ -2322,17 +2323,17 @@ param(
                                         $open + "[System.Int64]$Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "[System.Int64] $Object"
+                                        " " * $IndentLevel * 4 + $Open + "[System.Int64] $Object"
                                     }
                                     break
                                 }
 
             "System.UInt16" {
                                     if($Compress) {
-                                        $open + "[System.UInt16] $0bject"
+                                        $open + "[System.UInt16] $Object"
                                     }
                                     else{
-                                        " " * $IndentLevel * 4 + $open + "[System.UInt16] $Object"
+                                        " " * $IndentLevel * 4 + $Open + "[System.UInt16] $Object"
                                     }
                                     break
                                 }
@@ -2416,7 +2417,7 @@ param(
                                     }
                                     else{
                                         $out += " " * $IndentLevel * 4 + "}"
-                                        $out -join "`r`n”
+                                        $out -join "`r`n"
                                     }
                                     break
                                 }
@@ -2445,7 +2446,7 @@ param(
                 $nameInMessage = $Name
 
                 if(!$Name) {
-                    $nameInMessage = Get-Variable -Name Name ValueOnly -Scope 1 -ErrorAction Ignore
+                    $nameInMessage = Get-Variable -Name Name -ValueOnly -Scope 1 -ErrorAction Ignore
                 }
 
                 throw "Couldn't convert datatype at '$nameInMessage': '$($Object.gettype().fullname)' - $Object"
@@ -2463,12 +2464,12 @@ param(
     $PSDataString = ConvertTo-PSData -Object $Object
     $resolvedPath = resolve-path -Path (split-path -path $Path) | Select-Object -ExpandProperty ProviderPath
     $leaf = Split-Path -Path $Path -Leaf
-    Set-Content -Value $PSDataString -Path (Join-Path -Path $resolved Path -Child Path $leaf) -Encoding Default
+    Set-Content -Value $PSDataString -Path (Join-Path -Path $resolvedPath -ChildPath $leaf) -Encoding Default
 }
 
 function ConvertFrom-PSData {
 param(
-    [Parameter(ValueFromPipeline = $true)] [string] $PSDataString
+    [Parameter(ValueFromPipeLine = $true)] [string] $PSDataString
 )
 begin{
     $allStrings = @()
@@ -2512,7 +2513,7 @@ param(
     [int] $StartPosition = 0
 )
 begin{
-    $paramDictionary = new-object-TypeName System.Management.Automation.RuntimeDefinedParameterDictionary
+    $paramDictionary = new-object -TypeName System.Management.Automation.RuntimeDefinedParameterDictionary
     $position = $StartPosition
 }
 process{
@@ -2582,11 +2583,11 @@ param(
     [switch] $SortByDate,
     [switch] $CaseSensitive,
     [switch] $IncludeAll,
-    [switch] $Firstline,
+    [switch] $FirstLine,
     [int] $MaxLines = [int]::MaxValue
 )
 dynamicParam{
-    $global:paramDef_ElementType | New-Dynamic Parameter
+    $global:paramDef_ElementType | New-DynamicParameter
 }
 end{
     if(!$Path) {
@@ -2604,7 +2605,7 @@ end{
         $include = $Extension | ForEach-Object {$_ -replace "^(\*)?(\.)?","*."}
     }
 
-    $Exclude = $Exclude | ForEach-Object {$ -replace "^(\*)?(\.)?","*." }
+    $Exclude = $Exclude | ForEach-Object {$_ -replace "^(\*)?(\.)?","*." }
 
     $selectedFiles = @()
 
@@ -2655,7 +2656,7 @@ end{
         }
 
         if($IncludeAll -and $Global:astTypes.$elementType.NotPart){
-            $notpart = "-and (!`$args[0].parent or `$args[0].parent.gettype().fullname -ne ""System.Management.Automation.Language.$($Global:astTypes.$elementType.NotPart)Ast"")"
+            $notpart = "-and (!`$args[0].parent -or `$args[0].parent.gettype().fullname -ne ""System.Management.Automation.Language.$($Global:astTypes.$elementType.NotPart)Ast"")"
         }
 
         if($Global:astTypes. $elementType.ContainsKey('TypeOverride')) {
@@ -2667,9 +2668,10 @@ end{
                             (Get-Property -Object `$args[0] -PropertyPath $($Global:astTypes.$elementType.PropName -join ', ')).Value -match '$Pattern'"
         }
 
-        if($Global:astTypes.$elementType.containskey('Additional Criteria')) {
+        if($Global:astTypes.$elementType.containskey('AdditionalCriteria')) {
             $querystr += " -and $($Global:astTypes.$elementType.AdditionalCriteria)"
         }
+
         if($Global:astTypes.$elementType.containskey('Or')){
             $querystr = "($querystr) -or ($(& $Global:astTypes.$elementType.Or))"
         }
@@ -2707,7 +2709,7 @@ end{
 
                 $tokens | &{process{
                     if($_.kind -eq 'Comment' -and (
-                            $res = $_.Extent.Text -split "\r\n" | Select-String -Pattern $Pattern @selectstringsplatting -Encoding default
+                            $res = $_.Extent.Text -split "\r?\n" | Select-String -Pattern $Pattern @selectstringsplatting -Encoding default
                        )) {
                             foreach($r in $res) {
                                 $return = [pscustomobject]@{
@@ -2726,10 +2728,10 @@ end{
                             }
                         }
                 }}
-           }
+            }
             else{
-               $toAdd = @($AST.FindAll($query, $true))
-               foreach ($ta in $toAdd) {
+                $toAdd = @($AST.FindAll($query, $true))
+                foreach ($ta in $toAdd) {
                     $expression = if($ta.gettype().fullname -match 'VariableExpression') {
                                         if($ta.parent.GetType().fullname -notmatch 'AssignmentStatement') {
                                             ($ast.Extent.Text -split "\r\n")[$ta.extent.StartLineNumber - 1].trim()
@@ -2748,7 +2750,7 @@ end{
                                         $ta.extent.Text
                                     }
 
-                    $expression = $expression -split '\r\n'
+                    $expression = $expression -split '\r?\n'
 
                     $currentMaxLines = $MaxLines
 
@@ -2851,15 +2853,15 @@ $paramDef_ElementType = [pscustomobject]@{
 function Convert-CustomObjectHash {
 <#
 .Synopsis
-   Merges properties / keys of the Secondary object hashtable to the Primary object hashtable.
+   Merges properties / keys of the Secondary object / hashtable to the Primary object / hashtable.
 .DESCRIPTION
    This function takes all properties or keys of the Secondary object / hashtable into the Primary object or hashtable. By default only those properties / keys are merge that doesn't exist in the Primary object / hashtable.
    If the -Force switch is used then the properties / keys of the Secondary object / hashtable always merged to the Primary.
 .EXAMPLE
-    $o = @{ObjProp = [pscustomobject] @{Prop1 = 1; Prop2 = 2}; HashProp = @{Key1 = 1; Key2 = 2}}; $result = Convert-CustomObjectHash -Object $0
+    $o = @{ObjProp = [pscustomobject] @{Prop1 = 1; Prop2 = 2}; HashProp = @{Key1 = 1; Key2 = 2}}; $result = Convert-CustomObjectHash -Object $o
     Because parameter -To is not specified, the conversion will be from [pscustomobject] to [hashtable], including all properties that are also [pscustomobject].
 .EXAMPLE
-    $0 = @{ObjProp = [pscustomobject] @{Prop1 = 1; Prop2 = 2}; HashProp = @{Key1 = 1; Key2 = 2}}; $result = Convert-CustomObjectHash -Object $0 -to pscustomobject
+    $o = @{ObjProp = [pscustomobject] @{Prop1 = 1; Prop2 = 2}; HashProp = @{Key1 = 1; Key2 = 2}}; $result = Convert-CustomObjectHash -Object $o -to pscustomobject
     Because the -To parameter is [pscustomobject], only the HashProp of the input object will be converted to [PScustomobject].
 .INPUTS
    hashtables or pscustomobjects
@@ -2886,10 +2888,10 @@ process{
     }
 
     if(!$PSBoundParameters.to){
-        if($object -is [System.Collections.IDictionary]){
+        if($Object -is [System.Collections.IDictionary]){
             $To = 'pscustomobject'
         }
-        elseif($object -is [System.Management.Automation.PSCustomObject]){
+        elseif($Object -is [System.Management.Automation.PSCustomObject]){
             $To = 'hashtable'
         }
         else{
@@ -2928,7 +2930,7 @@ $configNc  = [string] $rootDse.configurationNamingContext
 $searchRoot = [ADSI]("LDAP://CN=Partitions," + $configNc)
 $searcher   = New-Object -TypeName System.DirectoryServices.DirectorySearcher -ArgumentList $searchRoot
 
-$searcher.Filter = "(&(objectClass-crossRef)(nCName=$defaultNc))"
+$searcher.Filter = "(&(objectClass=crossRef)(nCName=$defaultNc))"
 $null = $searcher.PropertiesToLoad.Add("nETBIOSName")
 $null = $searcher.PropertiesToLoad.Add("dnsRoot")
 
@@ -2972,18 +2974,18 @@ function Get-DomainNetBIOSNameComputer {
 function Get-StrictMode {
     $innerField = [System.Management.Automation.SessionState].GetField(
         'sessionState',
-        [System.Reflection.BindingFlags] 'Instance, NonPublic'
+        [System.Reflection.BindingFlags] 'Instance,NonPublic'
     )
 
     $inner = $innerField.GetValue($ExecutionContext.SessionState)
     $scopeProp = $inner.GetType().GetProperty(
         'CurrentScope',
-        [System.Reflection.BindingFlags] 'Instance, NonPublic, Public'
+        [System.Reflection.BindingFlags] 'Instance,NonPublic,Public'
     )
     $scope = $scopeProp.GetValue($inner, $null)
     $strictProp = $scope.GetType().GetProperty(
         'StrictModeVersion',
-        [System.Reflection.BindingFlags] 'Instance, NonPublic, Public'
+        [System.Reflection.BindingFlags] 'Instance,NonPublic,Public'
     )
     $version = $strictProp.GetValue($scope, $null)
 
@@ -3032,10 +3034,10 @@ This function is meant to extend the scope and functionality of Add-Member.
 $splatting @{}; Update-Property -Object $splatting -PropName DisplayName Value 'Tibor Soos'; Update-Property -Object $splatting -PropName Replace Value @{proxyAddresses = "SMTP: Soos.Tibor@hotmail.com"}
 In this example we prepare a hashtable $splatting for splatting the Set-ADUser cmdlet to set the displayname and the proxyAddresses attribute of an AD user object.
 .EXAMPLE
-Update-Property -Object $splatting -PropName Replace Value @{proxyAddresses = "smtp:Soos Tibor@hotmail.com"}; $splatting.Replace
+Update-Property -Object $splatting -PropName Replace Value @{proxyAddresses = "smtp:Soos.Tibor@hotmail.com"}; $splatting.Replace
 In this example we add a secondary SMTP address to the splatting hashtable under its Replace key.
 .EXAMPLE
-Update-Property -Object $splatting. Replace -PropName proxyAddresses -Value "smtp:tibor.soos@hotmail.com" -Pass Thru
+Update-Property -Object $splatting. Replace -PropName proxyAddresses -Value "smtp:tibor.soos@hotmail.com" -PassThru
 In this example we add another secondary SMTP address to the splatting hashtable directly under its Replace.proxyAddresses key. Using the -Pass Thru switch we get back the updates hashtable under the Replace key.
 .EXAMPLE
 $obj = [pscustomobject] @{Prop1 = "Text"; Prop3 = "Obsolete"}; Update-Property -Object $obj -PropName Prop2; Update-Property -Object $obj -PropName Prop3 -Value Fresh -Force; Update-Property -Object $obj -PropName Prop1 -Value NewText -PassThru
@@ -3075,7 +3077,7 @@ param(
                     $nextProp2, $PropertyPath2 = $PropertyPath -split '\.|(?=\[\w+\]$)', 2
                     $value2 = @{$nextProp2 = $null}
 
-                    if($object -isnot [system.collections.iDictionary]){
+                    if($Object -isnot [system.collections.iDictionary]){
                         $value2 = [pscustomobject] $value2
                     }
 
@@ -3099,9 +3101,9 @@ param(
         if($null -ne ($Matches[1] -as [int])) {
             $indx = [int] $Matches[1]
 
-            if($object -is [collections.ilist]){
+            if($Object -is [collections.ilist]){
                 $PropertyPath = $null
-                if($object.count -le $indx) {
+                if($Object.count -le $indx) {
                     if($ErrorActionPreference -ne 'Ignore') {
                         Write-Error "Index property is out of range"
                     }
@@ -3130,12 +3132,12 @@ param(
     if($Object -is [System.Collections.IDictionary] -and !$Object.containskey($PropertyPath)){
         $Object.$PropertyPath = $Value
     }
-    elseif($object -isnot [System.Collections.IDictionary] -and $Object -isnot [system.collections.ilist] -and (!@($Object.psobject.Properties).count -or $Object.psobject.Properties.Name -notcontains $PropertyPath)){
-        Add-Member -InputObject $0bject -MemberType NoteProperty -Name $PropertyPath -Value $Value
+    elseif($Object -isnot [System.Collections.IDictionary] -and $Object -isnot [system.collections.ilist] -and (!@($Object.psobject.Properties).count -or $Object.psobject.Properties.Name -notcontains $PropertyPath)){
+        Add-Member -InputObject $Object -MemberType NoteProperty -Name $PropertyPath -Value $Value
     }
     elseif($Force){
         if($null -eq $indx) {
-            if($object -isnot [psobject] -or $Object.psobject.properties.name -notcontains $PropertyPath) {
+            if($Object -isnot [psobject] -or $Object.psobject.properties.name -notcontains $PropertyPath) {
                 Add-Member -InputObject $Object -MemberType NoteProperty -Name $PropertyPath -Value $Value
             }
             else{
@@ -3152,16 +3154,16 @@ param(
                 $Object.$PropertyPath = $Object.$PropertyPath | Where-Object {$OverwriteValue -ne $_}
             }
 
-            if(($object.$PropertyPath -is [int] -or $Object.$PropertyPath -is [double] -or $Object.$PropertyPath -is [decimal] -or $Object.$PropertyPath -is [System.Int64]) -and ($Value -is [int] -or $Value -is [double] -or $Value -is [decimal] -or $Value -is [System.Int64]) ) {
+            if(($Object.$PropertyPath -is [int] -or $Object.$PropertyPath -is [double] -or $Object.$PropertyPath -is [decimal] -or $Object.$PropertyPath -is [System.Int64]) -and ($Value -is [int] -or $Value -is [double] -or $Value -is [decimal] -or $Value -is [System.Int64]) ) {
                     $Object.$PropertyPath += $Value
             }
-            elseif($object.$PropertyPath -is [string]) {
-                if($Value -ne $0bject.$PropertyPath) {
-                    $Object.$PropertyPath = @($object.$PropertyPath) + $Value
+            elseif($Object.$PropertyPath -is [string]) {
+                if($Value -ne $Object.$PropertyPath) {
+                    $Object.$PropertyPath = @($Object.$PropertyPath) + $Value
                 }
             }
-            elseif($object.$PropertyPath -is [collections.ilist]){
-                if($object.$PropertyPath.count -gt 0 -and $Object.$PropertyPath[0] -is [System.Collections.IDictionary]){
+            elseif($Object.$PropertyPath -is [collections.ilist]){
+                if($Object.$PropertyPath.count -gt 0 -and $Object.$PropertyPath[0] -is [System.Collections.IDictionary]){
                     if($Value -is [collections.ilist] -and $Value.count -gt 0 -and $Value[0] -is [System.Collections.IDictionary]){
                         $existingKeys = $Object.$PropertyPath | &{process{$_.Keys}}
 
@@ -3199,16 +3201,16 @@ param(
                 else{
                     $toadd = @()
                     foreach ($elem in $Value){
-                        if($object.$PropertyPath -notcontains $elem) {
+                        if($Object.$PropertyPath -notcontains $elem) {
                             $toadd + $elem
                         }
                     }
 
                     if($toadd){
-                        if($object.$PropertyPath -is [System.Collections.ArrayList]){
+                        if($Object.$PropertyPath -is [System.Collections.ArrayList]){
                            $Object.$PropertyPath.addrange($toadd)
                         }
-                        elseif($object -isnot [psobject]){
+                        elseif($Object -isnot [psobject]){
                            Add-Member -InputObject $Object -MemberType NoteProperty -Name $PropertyPath -Value $toadd
                         }
                         else{
@@ -3217,12 +3219,12 @@ param(
                     }
                 }
             }
-            elseif($object.$PropertyPath -is [System.Collections.IDictionary] -and $Value -is [System.Collections.IDictionary]){
+            elseif($Object.$PropertyPath -is [System.Collections.IDictionary] -and $Value -is [System.Collections.IDictionary]){
                 $keys = [object[]] $Value.keys
 
                 foreach($key in $keys) {
-                    if($object.$PropertyPath.containskey($key)) {
-                        if($object.$PropertyPath.$key -notcontains $Value.$key) {
+                    if($Object.$PropertyPath.containskey($key)) {
+                        if($Object.$PropertyPath.$key -notcontains $Value.$key) {
                             if($null -ne $Object.$PropertyPath.$key){
                                 $Object.$PropertyPath.$key = @($Object.$PropertyPath.$key) + $Value.$key
                             }
@@ -3352,7 +3354,7 @@ Searches for patterns in properties of objects or keys of hashtables.
    If the -ExcludeValues switch is used then it skips the search in values of properties / keys.
    If we want a literal search and not a regex pattern matching then the -LiteralSearch switch can be used. If we want to restrict search in certain properties / keys, then we can specify those names at the -Propery parameter.
    If the pattern is in the form of '<name>', the the function searches for all the properties / keys where the value matches the value of property / key with name   'name'.
-   If we want to skip certain properties / keys, then we can specify those at the -Exclude Property parameter.
+   If we want to skip certain properties / keys, then we can specify those at the -ExcludeProperty parameter.
    By default the search is case insensitive, we can make it case sensitive by specifying the -CaseSensitive switch.
    By default the search is done among those properties / keys which contain a collection of values. To skip searching in those properties we can specify the -IgnoreCollections switch.
    By default the search goes into the immediate properties / keys of the input objects. We can specify the search depth by assigning a value to the -Depth parameter.
@@ -3371,7 +3373,7 @@ key 'Subkey2'.
 .OUTPUTS
    Collection of custom objects having an Object, Name and Value properties.
 #>
-[cmdletbinding (PositionalBinding=$false)]
+[cmdletbinding(PositionalBinding=$false)]
 param(
     # Regex pattern to search for
     [parameter(Position=0)][string] $Pattern = ".",
@@ -3401,11 +3403,11 @@ param(
 )
 begin{
     if($LiteralSearch -and $Pattern -ne "."){
-        $Pattern = [regex]:: Escape($Pattern)
+        $Pattern = [regex]::Escape($Pattern)
     }
 
     if($CaseSensitive){
-        $Pattern = "(?-i) $Pattern"
+        $Pattern = "(?-i)$Pattern"
     }
 
     $origpattern = $Pattern
@@ -3443,7 +3445,7 @@ begin{
 }
 process{
     $type = $Object.gettype().fullname
-    foreach($o in $object) {
+    foreach($o in $Object) {
         if($null -eq $o){
             continue
         }
@@ -3484,7 +3486,7 @@ process{
                    $elem = [string] $elem
                 }
 
-                Search-Property -Object $elem -Pattern $origpattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property:$Property -ExcludeProperty:$Exclude Property -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -_ParentNames $parentNames -_ObjectName $objectName
+                Search-Property -Object $elem -Pattern $origpattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property:$Property -ExcludeProperty:$ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -_ParentNames $parentNames -_ObjectName $objectName
                 $index++
             }
         }
@@ -3540,14 +3542,14 @@ process{
 
                 if($prop.value -and $prop.value.gettype().fullname -notin 'system.string', 'system.int32' -and $_Depth -lt $Depth) {
                     if($prop.value -is [collections.ilist]){
-                        Search-Property -Object (,$prop.value) -Pattern $pattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property $Property -Exclude Property $Exclude Property -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -ParentNames ($_ParentNames + $PropName) -ObjectName $objectName
+                        Search-Property -Object (,$prop.value) -Pattern $pattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property $Property -ExcludeProperty $ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -_ParentNames ($_ParentNames + $PropName) -_ObjectName $objectName
                     }
                     elseif($prop.Value -is [System.Management.Automation.PSReference]) {
                         $obj = [pscustomobject] @{Value = $prop.value.value}
-                        Search-Property -Object $obj -Pattern $pattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property $Property -ExcludeProperty $ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -ParentNames ($_ParentNames + $PropName) -ObjectName $objectName
+                        Search-Property -Object $obj -Pattern $pattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property $Property -ExcludeProperty $ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections:$IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -_ParentNames ($_ParentNames + $PropName) -_ObjectName $objectName
                     }
                     else{
-                        Search-Property -Object $prop.value -Pattern $pattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property $Property -ExcludeProperty $ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections: $IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -ParentNames ($_ParentNames + $PropName) -_ObjectName $objectName
+                        Search-Property -Object $prop.value -Pattern $pattern -SearchInPropertyNames:$SearchInPropertyNames -ExcludeValues:$ExcludeValues -LiteralSearch:$LiteralSearch -Property $Property -ExcludeProperty $ExcludeProperty -CaseSensitive:$CaseSensitive -IgnoreCollections: $IgnoreCollections -Depth $Depth -_Depth ($_Depth + 1) -_ParentNames ($_ParentNames + $PropName) -_ObjectName $objectName
                     }
                 }
             }
@@ -3567,7 +3569,7 @@ function Compare-Property {
     $f1 = Get-Item C:\Windows\notepad.exe; $f2 = Get-Item C:\Windows\System32\notepad.exe; Compare-Property -ReferenceObject $f1 -DifferenceObject $f2
     This expression compares the properties of 2 notepad.exe files and returns all properties that are different.
 .EXAMPLE
-    $f1 = Get-Item C:\Windows\notepad.exe; $f2 = Get-Item C:\Windows\System32\notepad.exe; Compare-Property -ReferenceObject $f1 -DifferenceObject $f2 -IncludeEqual -Exclude Different -Exclude PS*
+    $f1 = Get-Item C:\Windows\notepad.exe; $f2 = Get-Item C:\Windows\System32\notepad.exe; Compare-Property -ReferenceObject $f1 -DifferenceObject $f2 -IncludeEqual -ExcludeDifferent -Exclude PS*
     In this example we compare the properties of the two notepad.exe file objects, exclude the properties that are different but include properties that are equal. We also exclude all properties whose name start with PS.
 .EXAMPLE
     Compare-Property -ReferenceObject @{Name = 'First'; Number = 1; Array = 1,2; RefEmpty = $null} -DifferenceObject @{ Name = 'Second'; Number = 2; Array = 2,3; DiffEmpty = @()} -Hide Empty -NameProperty Name -Exclude Name
@@ -3672,7 +3674,7 @@ param(
         else{
             $equal = "=="
             for($i = 0; $i -lt $ReferenceObject.psbase.count; $i++){
-                $diff = Compare-Property -ReferenceObject $ReferenceObject[$i] -DifferenceObject $DifferenceObject[$i] -Depth ($_Depth + 1)
+                $diff = Compare-Property -ReferenceObject $ReferenceObject[$i] -DifferenceObject $DifferenceObject[$i] -_Depth ($_Depth + 1)
                 if($diff){
                     $equal = "<>"
                     break
@@ -3694,7 +3696,7 @@ param(
             if(!$rObjName) {
                 $rObjName = $ReferenceObject | &{process{ & $NameProperty}}
             }
-            if(!$dobjName) {
+            if(!$dObjName) {
                 $dObjName = $DifferenceObject | &{process{ & $NameProperty}}
             }
         }
@@ -3703,7 +3705,7 @@ param(
         if(!$rObjName) {
             $rObjName = $ReferenceObject.tostring()
         }
-        if(!$dobjName) {
+        if(!$dObjName) {
             $dObjName = $DifferenceObject.tostring()
         }
     }
@@ -3778,7 +3780,7 @@ param(
                 $ra = $ReferenceObject.$p
                 $da = $DifferenceObject.$p
 
-                $diff = Compare-Property -ReferenceObject $ra -DifferenceObject $da -Property $Property -Exclude $Exclude -Depth ($ Depth + 1)
+                $diff = Compare-Property -ReferenceObject $ra -DifferenceObject $da -Property $Property -Exclude $Exclude -_Depth ($_Depth + 1)
                 if($diff){
                     $equal = "<>"
                 }
@@ -3792,7 +3794,7 @@ param(
                 $da = $null
             }
             else{
-               $equal = "=>"
+                $equal = "=>"
                 $da = $DifferenceObject.$p
                 $ra = $null
             }
@@ -3802,13 +3804,13 @@ param(
                         (($ra -is [collections.ilist] -or $ra -is [Collections.IDictionary]) -and $ra.count -eq 0) -or
                         $ra -is [System.DBNull]
 
-           $daempty = $null -eq $da -or
+            $daempty = $null -eq $da -or
                         '' -eq $da -or
                         (($da -is [collections.ilist] -or $da -is [Collections.IDictionary]) -and $da.count -eq 0) -or
                         $ra -is [System.DBNull]
 
             if((!$Excludedifferent -and $equal -ne '==') -or ($includeequal -and $equal -eq '==')){
-                if(($Hide -eq 'Both Empty' -and $raempty -and $daempty) -or
+                if(($Hide -eq 'BothEmpty' -and $raempty -and $daempty) -or
                     ($Hide -eq 'Empty' -and ($raempty -or $daempty)) -or
                     ($Hide -eq 'NonEmpty' -and (!$raempty -or !$daempty))) {
                     continue
@@ -3832,10 +3834,10 @@ function Get-Property {
 .DESCRIPTION
     This function gets the value of a property or key under a hierarchy of properties and keys and/or under the index of collections.
 .EXAMPLE
-   Get-ChildItem C:\Windows\system32\*.exe | Get-Property -PropertyPath "Version Info. CompanyName", "PSDrive. Provider.Name" -ObjectNameProperty Name
-    Gets the Version Info. CompanyName and PSDrive. Provider. Name properties of all EXE files under c:\windows\system32 folder. The result will have the Name of each files under the Object column.
+    Get-ChildItem C:\Windows\system32\*.exe | Get-Property -PropertyPath "VersionInfo.CompanyName", "PSDrive.Provider.Name" -ObjectNameProperty Name
+    Gets the VersionInfo.CompanyName and PSDrive.Provider.Name properties of all EXE files under c:\windows\system32 folder. The result will have the Name of each files under the Object column.
 .EXAMPLE
-   $h = @{Name = "MyHashTable"; Array = @{n = 'First'; data = 'Text1'}, @{n = 'Second'; data = 'Text2'}}; Get-Property -Object $h -PropertyPath 'Array[1].data' -ValueOnly
+    $h = @{Name = "MyHashTable"; Array = @{n = 'First'; data = 'Text1'}, @{n = 'Second'; data = 'Text2'}}; Get-Property -Object $h -PropertyPath 'Array[1].data' -ValueOnly
     In this example we get the 'Text2' from hashtable $h. In this case the -PropertyPath contains an index as well and because we used the -ValueOnly switch only the value of 'data' is returned.
 .INPUTS
     hashtables or psobjects
@@ -3908,7 +3910,7 @@ process{
         $Object, $Object
     }
 
-    foreach ($obj in $object){
+    foreach ($obj in $Object){
         if($null -eq $obj) {
             continue
         }
@@ -3986,7 +3988,7 @@ process{
             }
         }
 
-        if($object -is [System.Collections.IList]){
+        if($Object -is [System.Collections.IList]){
             $ObjectName = $ObjectName -replace "\[\d+\]$" -replace '$', "[$objectCount]"
             $objectCount++
         }
@@ -3997,10 +3999,10 @@ process{
 function Merge-Property {
 <#
 .Synopsis
-Merges properties / keys of the Secondary object hashtable to the Primary object hashtable.
+Merges properties / keys of the Secondary object / hashtable to the Primary object / hashtable.
 .DESCRIPTION
-This function takes all properties or keys of the Secondary object hashtable into the Primary object or hashtable. By default only those properties / keys are merge that doesn't exist in the Primary object hashtable.
-If the -Force switch is used then the properties / keys of the Secondary object hashtable always merged to the Primary.
+This function takes all properties or keys of the Secondary object / hashtable into the Primary object or hashtable. By default only those properties / keys are merge that doesn't exist in the Primary object hashtable.
+If the -Force switch is used then the properties / keys of the Secondary object / hashtable always merged to the Primary.
 .EXAMPLE
 $p = @{one = 1; three = 3}; $s = [pscustomobject]@{two = 2; three = 33; four = 4}; Merge-Property -Primary $p -Secondary $s -PassThru
 Merges $s into $p. The updated hashtable will have its key 'three' remained to be 3.
@@ -4010,7 +4012,7 @@ Merges $s into $p. The updated hashtable will have its key 'three' updated to be
 .INPUTS
 Hashtables or PSObjects
 .OUTPUTS
-None or the updated object of the Primary object if the -Pass Thru switch is used.
+None or the updated object of the Primary object if the -PassThru switch is used.
 #>
 [cmdletbinding (PositionalBinding=$false)]
 param(
@@ -4035,7 +4037,7 @@ param(
         else{
             foreach($prop in $Secondary.psobject.properties.name){
                 if($Force -or !$Primary.containskey($prop)){
-                    $Primary.$prop = $Secondary. $prop
+                    $Primary.$prop = $Secondary.$prop
                 }
             }
         }
@@ -4044,7 +4046,7 @@ param(
         if($Secondary -is [System.Collections.IDictionary]) {
             foreach($key in $Secondary.keys){
                 if($Force -or $Primary.psobject.properties.name -notcontains $key){
-                    Add-Member -InputObject $Primary -MemberType NoteProperty -Name $key -Value $Secondary. $key -Force
+                    Add-Member -InputObject $Primary -MemberType NoteProperty -Name $key -Value $Secondary.$key -Force
                 }
             }
         }
@@ -4070,17 +4072,17 @@ Expands all the properties or keys of the input object.
 Recursively dumps all properties or keys of the input object. By default it goes 1 level deep, but with the -MaxDepth parameter you can allow deep search.
 If the -Condensed switch is used, only the leaf properties are returned (properties that don't have any further properties or which are at the -MaxDepth).
 .EXAMPLE
-Expand-Property -Object $PSVersionTable -MaxDepth 2 -SkipTypes Additional system. version
+Expand-Property -Object $PSVersionTable -MaxDepth 2 -SkipTypesAdditional system.version
 Expands the properties of the $PSVersionTable object down to 2 level deep, but any [system. version] type of property won't be expanded further.
 .EXAMPLE
-Expand-Property -Object $PSVersionTable -MaxDepth 2 -SkipTypes Additional system. version -Condensed
+Expand-Property -Object $PSVersionTable -MaxDepth 2 -SkipTypesAdditional system.version -Condensed
 Expands only the last properties in the hierarchy of properties in the $PSVersionTable object down to 2 level deep, but any [system.version] type of property won't be expanded further.
 .INPUTS
 Hashtables or PSObjects
 .OUTPUTS
 Collection of custom objects having a PropertyPath, Type, and Value properties.
 #>
-[cmdletbinding (PositionalBinding=$false)]
+[cmdletbinding(PositionalBinding=$false)]
 param(
     # Input object or hashtable
     [Parameter(ValueFromPipeline = $true, Position = 0)] $Object,
@@ -4145,7 +4147,7 @@ process{
         $displayPath = $ObjectName
     }
 
-    if($null -eq $object) {
+    if($null -eq $Object) {
         $r = [pscustomobject] @{
                 Object = $displayPath
                 PropertyPath = $PropertyPath
@@ -4174,7 +4176,7 @@ process{
     $keys = $null
 
     if(!($excludeType | &{process{if($Object.gettype().fullname -like $_ -or $Object.pstypenames -contains $_){$_}}})){
-        if($object -is [System.Collections.IDictionary]){
+        if($Object -is [System.Collections.IDictionary]){
             $keys = $Object.Keys
         }
         else{
@@ -4194,8 +4196,8 @@ process{
                     Object = $displayPath
                     PropertyPath = $PropertyPath
                     Depth = $_currentDepth
-                    Type = $(if($null -ne $object){$object.GetType().fullname})
-                    Value = $0bject
+                    Type = $(if($null -ne $Object){$Object.GetType().fullname})
+                    Value = $Object
                 }
             $r.pstypenames.insert(0, 'ScriptTools.Property.Expand')
             $r
@@ -4208,7 +4210,7 @@ process{
         foreach($key in $keys){
             $displayKey = $key
             if($key -match '\W'){
-                $displayKey = "*$key'"
+                $displayKey = "'$key'"
             }
 
             Expand-Property -Object $Object.$key -ObjectName $displayPath -MaxDepth $MaxDepth -LeafOnly:$LeafOnly -_currentDepth ($_currentDepth + 1) -SkipTypesDefault $SkipTypesDefault -SkipTypesAdditional $SkipTypesAdditional -PropertyPath $(if($PropertyPath){$PropertyPath + '.' + $displayKey}else{$displayKey})
@@ -4231,25 +4233,25 @@ function Remove-Property {
 .DESCRIPTION
    This function removes a property or key from an object or hashtable. It supports navigating nested property paths using dot notation and index notation (e.g. 'Parent. Child' or 'Array[0]').
    If the property or key does not exist, an error is written unless -ErrorAction Ignore is specified.
-   The -Pass Thru switch can be used to return the root input object after the removal.
+   The -PassThru switch can be used to return the root input object after the removal.
 .EXAMPLE
    $obj = [pscustomobject] @{Prop1 = "Text"; Prop2 = "ToRemove"}; Remove-Property -Object $obj -PropertyPath Prop2; $obj
    In this example the property 'Prop2' is removed from the custom object $obj. Afterwards only Prop1 remains on the object.
 .EXAMPLE
-   $h = @{Name = "MyHashTable"; Temp = "RemoveMe"}; Remove-Property -Object $h -PropertyPath Temp -Pass Thru
+   $h = @{Name = "MyHashTable"; Temp = "RemoveMe"}; Remove-Property -Object $h -PropertyPath Temp -PassThru
    In this example the key 'Temp' is removed from hashtable $h. Because -PassThru is used, the updated hashtable is returned.
 .EXAMPLE
    $h = @{Level1 = @{Level2 = "Value"; Extra = "Delete"}}; Remove-Property -Object $h -PropertyPath 'Level1.Extra'
    In this example a nested key 'Extra' under 'Level1' is removed from the hashtable $h using dot notation in -PropertyPath.
 .EXAMPLE
-   $list = [System.Collections.Generic. List[object]] @("First", "Second", "Third"); Remove-Property -Object $list -PropertyPath '[1]' -PassThru
+   $list = [System.Collections.Generic.List[object]] @("First", "Second", "Third"); Remove-Property -Object $list -PropertyPath '[1]' -PassThru
    In this example the element at index 1 ('Second') is removed from the list using index notation in -PropertyPath. The updated list is returned via -PassThru.
 .INPUTS
    hashtable or psobject
 .OUTPUTS
-   The updated input object if the -Pass Thru switch is used.
+   The updated input object if the -PassThru switch is used.
 #>
-[cmdletbinding (PositionalBinding=$false)]
+[cmdletbinding(PositionalBinding=$false)]
 param(
     # Input object, either a hashtable or a PSObject
     [Parameter(Position = 0, Mandatory = $true)] [psobject] $Object,
@@ -4310,9 +4312,9 @@ param(
         if($null -ne ($Matches[1] -as [int])){
             $indx = [int] $Matches[1]
 
-            if($object -is [collections.ilist]){
+            if($Object -is [collections.ilist]){
                 $PropertyPath = $null
-                if($object.count -le $indx) {
+                if($Object.count -le $indx) {
                     if($ErrorActionPreference -ne 'Ignore') {
                         Write-Error "Index property is out of range"
                     }
@@ -4331,14 +4333,14 @@ param(
 
     $PropertyPath = $PropertyPath -replace '^[''"]|[''"]$'
 
-    if($null -eq $object) {
+    if($null -eq $Object) {
         if($ErrorActionPreference -ne 'Ignore') {
            Write-Error "No object"
         }
         return
     }
 
-    if($object -is [System.Collections.IDictionary]){
+    if($Object -is [System.Collections.IDictionary]){
         $Object.Remove($PropertyPath)
     }
     else{
@@ -4379,7 +4381,7 @@ param(
    Continue = 512                 # Terminate the current flow and jump and start the flow with the next element in a loop.
    Exit = 896                     # 'Stop' flag (128 is not exposed on its own) + Break + Continue, used for functions that need to stop the whole execution flow but not as a result of an error
    Terminate = 897                # 'Stop' flag (128 is not exposed on its own) + Break + Continue + Error, used for functions that need to terminate the whole execution flow due to an error
-   SkippedPermanently = 1024      # Doesn't count against Dependson and Conflicts with checks, used for functions that should be skipped in all circumstances
+   SkippedPermanently = 1024      # Doesn't count against DependsOn and ConflictsWith checks, used for functions that should be skipped in all circumstances
    TimeOut = 2048                 # The function is considered to be timed out based on the Retry configuration. We can use it together with Error or Failed if we want to consider timeout as a failure, or with Skipped if we want to consider timeout as a skip.
    Dump = 4096                    # The framework should save the current data bus and status information to a file for debugging purposes when this exit code is used, can be combined with Error, Failed, Skipped, etc.
    Retry = 8192                   # The function needs to be retried based on the Retry configuration.
@@ -4509,7 +4511,7 @@ class Retry {
     [string] NeedToRetry ([exitCode] $ExitCode){
         $result = 'Yes'
 
-        if(!(IsExitCode0K -exitcode $ExitCode) -and !($ExitCode -band $this.RetryUntil)){
+        if(!(IsExitCodeOK -exitcode $ExitCode) -and !($ExitCode -band $this.RetryUntil)){
             $result = $this.NeedToRetry()
         }
         else{
@@ -4535,7 +4537,7 @@ class Retry {
     [void] WaitForNextRetry () {
         if($this.Retried -gt 0){
             $waitTill = $this.LastRetry + $this.RetryDelay
-            $waitFor = $waitTill = (get-date)
+            $waitFor = $waitTill - (get-date)
 
             if($waitFor -gt 0){
                 Start-Sleep -Seconds $waitFor.totalseconds
@@ -4552,11 +4554,11 @@ function New-MicroFunctionRetry {
     Helper factory for micro-function Retry defaults. Supports counter-based,
     timeout-based, combined, and fully custom RetryUntil configurations.
 .EXAMPLE
-    $Retry (New-MicroFunctionRetry -Counter 3 -Delay '0:0:5')
+    $Retry = (New-MicroFunctionRetry -Counter 3 -Delay '0:0:5')
 .EXAMPLE
     $Retry = (New-MicroFunctionRetry -TimeOut '0:2:0' -Delay '0:0:10')
 .EXAMPLE
-   $Retry (New-MicroFunctionRetry -RetryUntil 'TimeOut, Error, Break, Continue' -Counter 5 -TimeOut '0:10:0' -Delay '0:0:5')
+   $Retry = (New-MicroFunctionRetry -RetryUntil 'TimeOut, Error, Break, Continue' -Counter 5 -TimeOut '0:10:0' -Delay '0:0:5')
 .INPUTS
     None. This function does not accept pipeline input.
 .OUTPUTS
@@ -4567,7 +4569,7 @@ param(
     [Parameter(Mandatory = $true, ParameterSetName = 'Counter')]
     [Parameter(Mandatory = $true, ParameterSetName = 'CounterAndTimeOut')]
     [Parameter(ParameterSetName = 'Custom')]
-    [ValidateRange(1, [uint32]:: MaxValue)]
+    [ValidateRange(1, [uint32]::MaxValue)]
     [uint32] $Counter,
 
     [Parameter(Mandatory = $true, ParameterSetName = 'TimeOut')]
@@ -4579,13 +4581,13 @@ param(
     [Parameter(ParameterSetName = 'TimeOut')]
     [Parameter(ParameterSetName = 'CounterAndTimeOut')]
     [Parameter(ParameterSetName = 'Custom')]
-    [object] $Delay =[timespan]::Zero,
+    [object] $Delay = [timespan]::Zero,
 
     [Parameter(Mandatory = $true, ParameterSetName = 'Custom')]
     [RetryUntil] $RetryUntil
 )
 
-   $toTimeSpan = {
+    $toTimeSpan = {
         param(
             [Parameter(Mandatory = $true)] [object] $Value,
             [Parameter(Mandatory = $true)] [string] $ParameterName
@@ -4639,7 +4641,7 @@ param(
             }
 
             if($RetryUntil -band [RetryUntil]::TimeOut) {
-                if(!$PSBoundParameters.ContainsKey('TimeOut')){\
+                if(!$PSBoundParameters.ContainsKey('TimeOut')){
                     throw "Parameter 'TimeOut' is required when RetryUntil includes 'TimeOut'."
                 }
 
@@ -4660,7 +4662,7 @@ function IsExitCodeOK {
    Applies the framework success-mask logic to an exitCode value and returns
     True when the code does not match the provided failure mask.
 .EXAMPLE
-    Is ExitCodeOK -ExitCode ([exitCode]: :OK)
+    IsExitCodeOK -ExitCode ([exitCode]::OK)
 
     Returns True.
 .INPUTS
@@ -4669,7 +4671,7 @@ function IsExitCodeOK {
     System.Boolean
 #>
 param([exitcode] $exitCode, $Against = [system.int32]::MaxValue)
-    $mask = [int]::MaxValue -bxor [exitCode]:: Dump
+    $mask = [int]::MaxValue -bxor [exitCode]::Dump
     $maskedExitCode = $exitCode -band $mask
 
     ! ($Against -band $maskedExitCode)
@@ -4777,7 +4779,7 @@ param(
     [regex]::Replace($String, '(?<=_)\d+(?=_)', { param($Match) $Match.Value.PadLeft(10, '0')})
 }
 
-function CheckDependson {
+function CheckDependsOn {
 <#
 .SYNOPSIS
     Evaluates dependency name patterns against executed functions.
@@ -4785,7 +4787,7 @@ function CheckDependson {
    Checks whether dependency or conflict patterns are satisfied by previously
     executed function names, including OR syntax within each pattern entry.
 .EXAMPLE
-   CheckDependson -functionNames Executed $ran -Matching @('Init', 'Prepare | Setup')
+   CheckDependsOn -functionNamesExecuted $ran -Matching @('Init', 'Prepare|Setup')
     Returns satisfied function names for matching patterns.
 .INPUTS
     System.String[]
@@ -4829,7 +4831,7 @@ function SelectFunctionsByDescriptiveNames {
    Accepts full or suffix-style function identifiers and maps them to matching
     micro-function names from the available function list.
 .EXAMPLE
-    SelectFunctionsByDescriptive Names -AllFunctions $all -CurrentFunction $f -Selections @('Initialize')
+    SelectFunctionsByDescriptiveNames -AllFunctions $all -CurrentFunction $f -Selections @('Initialize')
     Returns resolved full function names.
 .INPUTS
     System.Object
@@ -4856,7 +4858,7 @@ param(
             $newSelections += $selection
         }
         else{
-            throw "*$s' is not a valid function name pattern in the parameters of function '$($CurrentFunction.name)"
+            throw "'$s' is not a valid function name pattern in the parameters of function '$($CurrentFunction.name)'"
         }
     }
 
@@ -4871,7 +4873,7 @@ function CheckMicroFunctionOrderNumberUniqueness {
    Scans function names for expected prefix-number-description format and
    returns duplicated order numbers or invalid names when found.
 .EXAMPLE
-   CheckMicroFunction OrderNumber Uniqueness -AllFunctions $functions
+   CheckMicroFunctionOrderNumberUniqueness -AllFunctions $functions
    Returns OK when numbering is valid and unique.
 .INPUTS
    System.Object
@@ -4916,10 +4918,10 @@ function GetFunctionParameterDeclarations {
 .SYNOPSIS
     Extracts execution-related parameter declarations from a function's AST.
 .DESCRIPTION
-    Reads ExecCriteria, Dependson, ConflictsWith, and Retry declarations from a function's
+    Reads ExecCriteria, DependsOn, ConflictsWith, and Retry declarations from a function's
     parameter block and evaluates them. Also detects loop-processing parameters.
 .OUTPUTS
-    [pscustomobject] with ExecCriteria, Depends On, ConflictsWith, Retry, LoopVariable
+    [pscustomobject] with ExecCriteria, DependsOn, ConflictsWith, Retry, LoopVariable
 #>
 [cmdletbinding()]
 param(
@@ -4943,16 +4945,16 @@ param(
     }
 
     # Extract DependsOn
-    $dependentFunctionsString = $paramBlock.Parameters | where-object {$_.Name.VariablePath.UserPath -eq 'Dependson'} | Select-Object -ExpandProperty DefaultValue | Select-Object -ExpandProperty Extent | Select-Object -ExpandProperty Text
-    [string[]] $Dependson = @()
+    $dependentFunctionsString = $paramBlock.Parameters | where-object {$_.Name.VariablePath.UserPath -eq 'DependsOn'} | Select-Object -ExpandProperty DefaultValue | Select-Object -ExpandProperty Extent | Select-Object -ExpandProperty Text
+    [string[]] $DependsOn = @()
 
     if($dependentFunctionsString) {
-        [string[]] $DependsOn = Invoke-Expression -Command $dependent Functions String
+        [string[]] $DependsOn = Invoke-Expression -Command $dependentFunctionsString
     }
 
     $newDependsOn = @()
     if($DependsOn) {
-       $newDependson = SelectFunctionsByDescriptive Names -AllFunctions $AllFunctions -CurrentFunction $CurrentFunction -Selections $DependsOn
+       $newDependson = SelectFunctionsByDescriptiveNames -AllFunctions $AllFunctions -CurrentFunction $CurrentFunction -Selections $DependsOn
     }
 
     # Extract ConflictsWith
@@ -4965,7 +4967,7 @@ param(
 
     $newConflictsWith = @()
     if($ConflictsWith){
-        $newConflictsWith = SelectFunctionsByDescriptive Names -AllFunctions $AllFunctions -CurrentFunction $CurrentFunction -Selections $ConflictsWith
+        $newConflictsWith = SelectFunctionsByDescriptiveNames -AllFunctions $AllFunctions -CurrentFunction $CurrentFunction -Selections $ConflictsWith
     }
 
     # Extract Retry
@@ -5025,7 +5027,7 @@ conditions against previous outputs. Returns exit code and skip reason message.
 param(
     [Parameter(Mandatory = $true)] [execCriteriaOptions] $ExecCriteria,
     [string[]] $ConflictsWith,
-    [string[]] $Dependson,
+    [string[]] $DependsOn,
     [standardOutput] $Output,
     [standardOutput] $PreviousStatus
 )
@@ -5033,14 +5035,14 @@ param(
     if($ExecCriteria -band [execCriteriaOptions]::SkipPermanently){
         return [pscustomobject] @{
             ShouldSkip = $true
-            ExitCode = [exitCode] 'Skipped Permanently'
+            ExitCode = [exitCode] 'SkippedPermanently'
             Message = 'Skipped because function set to permanently skip'
         }
     }
 
     # Check ExecCriteria Skip rules against this output's history
     if($ExecCriteria -band [execCriteriaTypes]::Skip){
-        if($output.AllOutputs){
+        if($Output.AllOutputs){
             # Check if criteria is met by previous steps
             if($PreviousStatus -and $PreviousStatus.ExitCode -band $ExecCriteria){
                 return [pscustomobject] @{
@@ -5087,7 +5089,7 @@ param(
                 }
             }
 
-            if($output.AllOutputs | where-object {$_.Source -in $dependentExecutions -and $_.ExitCode -band $ExecCriteria}){
+            if($Output.AllOutputs | where-object {$_.Source -in $dependentExecutions -and $_.ExitCode -band $ExecCriteria}){
                 return [pscustomobject] @{
                     ShouldSkip = $true
                     ExitCode = [exitCode] 'Skipped'
@@ -5225,7 +5227,7 @@ function MergeSplattingWithRemoteParameters {
 .INPUTS
     None. This function does not accept pipeline input.
 .OUTPUTS
-    System.Management. Automation. PSCustomObject
+    System.Management.Automation.PSCustomObject
 #>
 [cmdletbinding()]
 param(
@@ -5299,7 +5301,7 @@ function MergeFunctionOutputLoop {
 .SYNOPSIS
     Merges function execution results during loop iteration.
 .DESCRIPTION
-    Similar to Merge FunctionOutput but skips ExitCode to preserve aggregated exit code
+    Similar to MergeFunctionOutput but skips ExitCode to preserve aggregated exit code
     from loop iterations. Used when processing collections element-by-element.
 .INPUTS
     None. This function does not accept pipeline input.
@@ -5345,7 +5347,7 @@ function InvokeMicroFunctionLoopProcessing {
 .INPUTS
     None. This function does not accept pipeline input.
 .OUTPUTS
-    System.Management. Automation.PSCustomObject
+    System.Management.Automation.PSCustomObject
 #>
 [cmdletbinding()]
 param(
@@ -5387,7 +5389,7 @@ param(
 
                         if($needToRetry -eq 'Yes'){
                             $Retry.WaitForNextRetry()
-                            $Output.FlowMessages += "Retrying $($Retry.Retried) after exit code '$($result.ExitCode)*"
+                            $Output.FlowMessages += "Retrying $($Retry.Retried) after exit code '$($result.ExitCode)'"
                         }
                         elseif($needToRetry -eq 'TimeOut'){
                             $result.ExitCode = $result.ExitCode -bor [exitCode]::TimeOut
@@ -5454,12 +5456,12 @@ function ExecuteMicroFunctionRemotely {
     Stages the script on the remote node when needed, invokes a generated
     remote execution wrapper, and returns result plus per-node output.
 .EXAMPLE
-    ExecuteMicroFunction Remotely -ExecuteOnComputer srv01 -ScriptPath $script -splatting $splat -CurrentFunctionName 'Flow_010_Run' -id 1
+    ExecuteMicroFunctionRemotely -ExecuteOnComputer srv01 -ScriptPath $script -splatting $splat -CurrentFunctionName 'Flow_010_Run' -id 1
     Executes the specified micro-function remotely.
 .INPUTS
     None. This function does not accept pipeline input.
 .OUTPUTS
-    System.Management. Automation. PSCustomObject
+    System.Management.Automation.PSCustomObject
 #>
 param(
     [string] $ExecuteOnComputer,
@@ -5518,16 +5520,18 @@ param(
     SkipOnSkip = 20
     SkipOnFailed = 24
     SkipOnIssue = 31
-    SkipOnDependentError = 33
-    SkipOnDependentWarning = 34
-    SkipOnDependentSkip = 36
-    SkipOnDependentFailed = 40
-    SkipOnDependentIssue = 47
-    SkipOnAnyError = 65
-    SkipOnAnyWarning = 66
-    SkipOnAnySkip = 68
-    SkipOnAnyFailed = 72
-    SkipOnAny Issue = 79
+
+    SkipOnDependentError = 49
+    SkipOnDependentWarning = 50
+    SkipOnDependentSkip = 52
+    SkipOnDependentFailed = 56
+    SkipOnDependentIssue = 63
+
+    SkipOnAnyError = 81
+    SkipOnAnyWarning = 82
+    SkipOnAnySkip = 84
+    SkipOnAnyFailed = 88
+    SkipOnAny Issue = 95
 }
 
 class standardOutput {
@@ -5539,25 +5543,25 @@ class standardOutput {
     [string] `$NextFunction
     [standardOutput[]] `$AllOutputs
 
-    standard Output () {
+    standardOutput () {
         `$this.exitCode = 0
         `$this.StatusMessages = [string[]] @()
         `$this.FlowMessages = [string[]] @()
-        `$this.Source =
-        `$this.NextFunction = $null
+        `$this.Source = ""
+        `$this.NextFunction = `$null
         `$this.AllOutputs = [standardOutput[]] @()
         `$this.id = 1
    }
 }
 
 [Flags()] enum RetryUntil {
-    Error 1
+    Error = 1
     Warning = 2
     Failed = 8
     Exit = 896
     Terminate = 897
     Break = 256
-    Continue 512
+    Continue = 512
     TimeOut = 2048
 }
 
@@ -5565,7 +5569,7 @@ class Retry {
     [RetryUntil] `$RetryUntil = [RetryUntil] 'Error, Break, Continue'
     [TimeSpan] `$TimeOut = 0
     [int32] `$Counter = 0
-    [TimeSpan] `$RetryDelay = Ө
+    [TimeSpan] `$RetryDelay = 0
     [datetime] `$StartTime
     [uint32] `$Retried = 0
     [datetime] `$LastRetry
@@ -5582,7 +5586,7 @@ class Retry {
         `$this.OriginalCounter = `$this.Counter
     }
 
-    Retry ([uint32] $RetryCounter) {
+    Retry ([uint32] `$RetryCounter) {
         `$this.Counter = `$RetryCounter - 1
         `$this.OriginalCounter = `$this.Counter
         `$this.RetryUntil = [RetryUntil] 'Error, Break, Continue'
@@ -5673,7 +5677,7 @@ class Retry {
     [string] NeedToRetry ([exitCode] `$ExitCode) {
         `$result = 'Yes'
 
-        if(!(IsExitCode0K -exitcode `$ExitCode) -and !(`$ExitCode -band `$this.RetryUntil)){
+        if(!(IsExitCodeOK -exitcode `$ExitCode) -and !(`$ExitCode -band `$this.RetryUntil)){
             `$result = `$this.NeedToRetry()
         }
         else{
@@ -5716,7 +5720,7 @@ class Retry {
 
     `$Output = [standardOutput] `$Output
 
-    - '$destinationScript' -DefineFunctionsOnly
+    . '$destinationScript' -DefineFunctionsOnly
 
     `$Retry = [retry] `$Splatting.Retry
 
@@ -5726,10 +5730,10 @@ class Retry {
 
         if(`$Retry){
             `$Retry.MarkRetry()
-            `$needToRetry = `$Retry.NeedToRetry(`$result.ExitCode)
+            `$needToRetry = `$Retry.NeedToRetry(`$result.ExitCode)
             if(`$needToRetry -eq 'Yes'){
                 `$Retry.WaitForNextRetry()
-                `$output.FlowMessages += "Retrying `$(`$Retry.Retried) after exit code "`$(`$result.ExitCode)'"
+                `$output.FlowMessages += "Retrying `$(`$Retry.Retried) after exit code '`$(`$result.ExitCode)'"
             }
             elseif(`$needToRetry -eq 'TimeOut'){
                  `$result.ExitCode = `$result.ExitCode -bor [exitCode]::TimeOut
@@ -5771,7 +5775,7 @@ function InvokeMicroFunctionWrapper {
     Builds runtime splatting from DataBus, evaluates skip criteria, executes
     local/remote/loop modes, merges outputs, and determines NextFunction.
 .EXAMPLE
-    InvokeMicroFunctionWrapper -DataBus $db -Current Function $fn -AllFunctions $all
+    InvokeMicroFunctionWrapper -DataBus $db -CurrentFunction $fn -AllFunctions $all
     Executes one orchestration step and returns standard output.
 .INPUTS
     None. This function does not accept pipeline input.
@@ -5791,7 +5795,7 @@ param(
     $InitialOutput
 )
 
-    $excludedParameters = 'ExecCriteria', 'Depends On', 'ConflictsWith', 'Retry', 'StatusMessages', 'ExecuteRemotely'
+    $excludedParameters = 'ExecCriteria', 'DependsOn', 'ConflictsWith', 'Retry', 'StatusMessages', 'ExecuteRemotely'
 
     # Extract execution-related declarations from function parameters
     $declarations = GetFunctionParameterDeclarations -CurrentFunction $CurrentFunction -AllFunctions $AllFunctions
@@ -5820,7 +5824,7 @@ param(
     $output = New-Object -TypeName standardOutput
     $output.Source = $CurrentFunction.Name
     if($PreviousStatus) {
-        if($PreviousStatus.All0utputs){
+        if($PreviousStatus.AllOutputs){
             $output.AllOutputs += $PreviousStatus.AllOutputs
         }
         $output.AllOutputs += $PreviousStatus
@@ -5886,7 +5890,7 @@ param(
                                 $id = @($previousOutputs.Value).Count
                             }
 
-                            $remoteResult = ExecuteMicroFunction Remotely -ExecuteOnComputer $computer -ScriptPath $DataBus.mainscriptpath -splatting $splatting -CurrentFunctionName $currentfunction.name -id $id
+                            $remoteResult = ExecuteMicroFunctionRemotely -ExecuteOnComputer $computer -ScriptPath $DataBus.mainscriptpath -splatting $splatting -CurrentFunctionName $currentfunction.name -id $id
 
                             $remoteResult.Output.AllOutputs += $previousOutputs.value
 
@@ -5934,7 +5938,7 @@ param(
                 $result = [pscustomobject] @{}
                 $output.FlowMessages += "Execution failed: $($_.exception.message)"
                 Write-Error -ErrorRecord $_
-                $traceInfo = ($_.ScriptStackTrace -split "\r\n" | Where-Object {$ -notmatch 'at (InvokeMicroFunctionWrapper,|Start-MicroFunctions,)'} ) -join "`r`n"
+                $traceInfo = ($_.ScriptStackTrace -split "\r\n" | Where-Object {$_ -notmatch 'at (InvokeMicroFunctionWrapper,|Start-MicroFunctions,)'} ) -join "`r`n"
                 Write-Error -Message $traceInfo
                 $output.ExitCode = 'Error'
 
@@ -5944,7 +5948,7 @@ param(
             }
 
             # Merge function output back to either standard status fields or DataBus payload fields
-            MergeFunctionOutput -Result $result -Output $output -DataBus $DataBus -Merge ResultTo $MergeResultTo
+            MergeFunctionOutput -Result $result -Output $output -DataBus $DataBus -MergeResultTo $MergeResultTo
         }
         elseif($DataBus.PSObject.Properties.Name -eq $loopVariable){
             $PSBoundParameters.LoopProcessing = $true
@@ -5961,10 +5965,10 @@ param(
                 MergeResultTo = $MergeResultTo
             }
 
-            $result = InvokeMicroFunction LoopProcessing @splattingInvokeMFLP
+            $result = InvokeMicroFunctionLoopProcessing @splattingInvokeMFLP
         }
         else{
-            throw "Loop variable '$loopVariable' is not valid in function '$($CurrentFunction.Name)*"
+            throw "Loop variable '$loopVariable' is not valid in function '$($CurrentFunction.Name)'"
         }
     }
     elseif($SkipHook) {
@@ -6003,7 +6007,7 @@ param(
     $nextFunctionAllowed = Get-Property -Object $result -PropertyPath "NextFunctionAllowed"
 
     if($nextFunctionAllowed.PropertyExists -and $nextFunctionAllowed.value){
-        $allowedNextFunction = SelectFunctionsByDescriptive Names -AllFunctions $AllFunctions -CurrentFunction $CurrentFunction -Selections $nextFunctionAllowed.value
+        $allowedNextFunction = SelectFunctionsByDescriptiveNames -AllFunctions $AllFunctions -CurrentFunction $CurrentFunction -Selections $nextFunctionAllowed.value
         if($allowedNextFunction -notcontains $nextFunctionName) {
             throw "Next function '$nextFunctionName' is not allowed by function '$($CurrentFunction.Name)'"
         }
@@ -6061,7 +6065,7 @@ function InitializeDataBus {
 .INPUTS
    None. This function does not accept pipeline input.
 .OUTPUTS
-    System.Collections. Hashtable
+    System.Collections.Hashtable
 #>
 [cmdletbinding()]
 param(
@@ -6089,7 +6093,7 @@ param(
     foreach($pb in $paramBlock){
         $variableName = $pb.Name.VariablePath.UserPath
 
-        if($variableName -eq 'Define Functions Only'){
+        if($variableName -eq 'DefineFunctionsOnly'){
             continue
         }
 
@@ -6129,14 +6133,14 @@ param(
 function LoadMicroFunctionsLibrary {
 <#
 .SYNOPSIS
-Loads external micro-function library scripts.
+    Loads external micro-function library scripts.
 .DESCRIPTION
-Parses and dots sources external .ps1 files containing micro-function definitions.
-Validates that files contain only function definitions and no other code.
+    Parses and dots sources external .ps1 files containing micro-function definitions.
+    Validates that files contain only function definitions and no other code.
 .INPUTS
-None. This function does not accept pipeline input.
+    None. This function does not accept pipeline input.
 .OUTPUTS
-System.String[]
+    System.String[]
 #>
 [cmdletbinding()]
 param(
@@ -6152,7 +6156,7 @@ param(
             $tokens = [System.Management.Automation.Language.Token[]]::new(1)
             $errors = [System.Management.Automation.Language.ParseError[]]::new(1)
 
-            $AST = [System.Management.Automation.Language.Parser]:: ParseFile(
+            $AST = [System.Management.Automation.Language.Parser]::ParseFile(
                 $es,
                 [ref] $tokens,
                 [ref] $errors
@@ -6189,7 +6193,7 @@ function InvokeMicroFunctionOrchestrationLoop {
     Executes the main orchestration loop for micro-function sequencing.
 .DESCRIPTION
     Iterates through functions in order, invoking each via InvokeMicroFunctionWrapper
-    and following the Next Function chain.
+    and following the NextFunction chain.
 .INPUTS
     None. This function does not accept pipeline input.
 .OUTPUTS
@@ -6245,20 +6249,20 @@ param(
 function Start-MicroFunctions {
 <#
 .SYNOPSIS
-Starts execution of a micro-function flow.
+    Starts execution of a micro-function flow.
 .DESCRIPTION
-Initializes and/or rehydrates DataBus state, loads function libraries,
-validates function order, and runs orchestration from the first or resumed step.
+    Initializes and/or rehydrates DataBus state, loads function libraries,
+    validates function order, and runs orchestration from the first or resumed step.
 .EXAMPLE
-Start-MicroFunctions -FunctionName Filter Flow_*
-Runs all matching micro-functions in orchestration order.
+    Start-MicroFunctions -FunctionName FilterFlow_*
+    Runs all matching micro-functions in orchestration order.
 .INPUTS
-None. This function does not accept pipeline input.
+    None. This function does not accept pipeline input.
 .OUTPUTS
-standardOutput
+    standardOutput
 #>
 param(
-    [Parameter (Mandatory = $true)] [string] $FunctionNameFilter,
+    [Parameter(Mandatory = $true)] [string] $FunctionNameFilter,
     [pscustomobject] $DataBus,
     [string[]] $MicroFunctionsLibrary,
     [scriptblock] $CatchScriptBlock,
@@ -6296,7 +6300,7 @@ param(
             Write-Error -Message 'No ParamBlock found'
         }
 
-        $dbhash.MainScriptPath = $script.InvocationInfo.MyCommand.Path
+        $dbHash.MainScriptPath = $script.InvocationInfo.MyCommand.Path
         
         $DataBus = [pscustomobject] $dbHash
         $pbp.Add("DataBus", $DataBus)
@@ -6330,10 +6334,10 @@ param(
         [void] (& $afterFunctionLoad)
     }
 
-    $functionsToExecute = Get-Command -Name $FunctionName Filter -CommandType Function | Sort-Object -Property {NormalizeStringWithNumber -String $_.Name}
+    $functionsToExecute = Get-Command -Name $FunctionNameFilter -CommandType Function | Sort-Object -Property {NormalizeStringWithNumber -String $_.Name}
 
     if(!$functionsToExecute){
-        throw "There are no functions available with pattern '$FunctionNameFilter*'"
+        throw "There are no functions available with pattern '$FunctionNameFilter'"
     }
 
     $duplicates = CheckMicroFunctionOrderNumberUniqueness -AllFunctions $functionsToExecute
@@ -6346,8 +6350,8 @@ param(
     $initialOutput = $null
 
     foreach($msp in $MainScriptParams) {
-        if($dbhash.ContainsKey($msp)) {
-            Update-Property -Object $DataBus -PropertyPath $msp -Value $dbhash.$msp -Force
+        if($dbHash.ContainsKey($msp)) {
+            Update-Property -Object $DataBus -PropertyPath $msp -Value $dbHash.$msp -Force
         }
     }
 
@@ -6397,7 +6401,7 @@ function Set-MicroFunctionDatabusValue {
     Stamps an object with internal metadata used by merge logic so downstream
     DataBus updates replace existing values instead of merging.
 .EXAMPLE
-    Set-MicroFunction DatabusValue -Object $newValue
+    Set-MicroFunctionDatabusValue -Object $newValue
     Marks the object for forced DataBus replacement semantics.
 .INPUTS
     System.Object
@@ -6406,7 +6410,7 @@ function Set-MicroFunctionDatabusValue {
 #>
 [cmdletbinding()]
 param(
-    [Parameter (Mandatory = $true)] [object] $Object
+    [Parameter(Mandatory = $true)] [object] $Object
 )
     Update-Property -Object $Object -PropertyPath _forceUpdateProperty -Value $true -Force
 }
